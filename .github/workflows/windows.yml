@@ -1,0 +1,33 @@
+name: Windows
+
+on:
+  push:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows.yml"
+
+jobs:
+  test-and-publish:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Test
+        run: dotnet test .\WechatStyleScreenshot.sln --configuration Release
+      - name: Publish
+        run: dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\publish
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WechatStyleScreenshot-Windows-win-x64
+          path: windows/publish/**
+
