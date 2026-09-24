@@ -13,6 +13,7 @@ public sealed class ScreenshotController
     private readonly AiOutfitPreviewService _outfitPreviewService;
     private readonly Action<string> _notify;
     private ScreenshotOverlayForm? _overlay;
+    private CancellationTokenSource? _outfitRequestCancellation;
     private bool _isCapturing;
     private bool _disposed;
 
@@ -46,6 +47,7 @@ public sealed class ScreenshotController
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
         _overlay.OutfitPreviewRequested += OnOutfitPreviewRequested;
+        _overlay.OutfitPreviewCancellationRequested += OnOutfitCancellationRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
         _overlay.FormClosed += OnOverlayClosed;
         _overlay.Show();
@@ -56,7 +58,8 @@ public sealed class ScreenshotController
     {
         try
         {
-            using Bitmap bitmap = _captureEngine.Capture(selection);
+            using Bitmap? outfitResult = (sender as ScreenshotOverlayForm)?.CreateOutfitResultImage();
+            using Bitmap bitmap = outfitResult ?? _captureEngine.Capture(selection);
             string text = await _ocrService.RecognizeAsync(bitmap);
             if (_disposed)
             {
@@ -105,7 +108,8 @@ public sealed class ScreenshotController
         try
         {
             Application.DoEvents();
-            using Bitmap bitmap = _captureEngine.Capture(selection);
+            using Bitmap? outfitResult = (sender as ScreenshotOverlayForm)?.CreateOutfitResultImage();
+            using Bitmap bitmap = outfitResult ?? _captureEngine.Capture(selection);
             _clipboardManager.SetImage(bitmap);
         }
         finally
@@ -116,28 +120,94 @@ public sealed class ScreenshotController
 
     private void OnCaptureCancelled(object? sender, EventArgs e)
     {
+        _outfitRequestCancellation?.Cancel();
         ResetOverlay();
     }
 
-    private void OnOutfitPreviewRequested(object? sender, Rectangle selection)
+    private async void OnOutfitPreviewRequested(object? sender, EventArgs e)
     {
+        if (_disposed || sender is not ScreenshotOverlayForm overlay || overlay.IsDisposed || _outfitRequestCancellation is not null)
+        {
+            return;
+        }
+
+        CancellationTokenSource cancellation = new();
+        _outfitRequestCancellation = cancellation;
+        Bitmap? resultImageToDispose = null;
         try
         {
-            Application.DoEvents();
-            Bitmap selectedImage = _captureEngine.Capture(selection);
-            ResetOverlay();
-            PreviewResultForm form = new(selectedImage, _outfitPreviewService, _clipboardManager);
-            form.Show();
+            using Bitmap originalSelection = overlay.CreateOutfitRequestImage();
+            await Task.Yield();
+            if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
+            {
+                overlay.FinishOutfitCancellation();
+                return;
+            }
+
+            overlay.MarkOutfitGenerating();
+            OutfitPreviewResult result = await _outfitPreviewService.GenerateAsync(
+                originalSelection,
+                new OutfitPreviewOptions(),
+                cancellation.Token);
+
+            if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
+            {
+                result.Image?.Dispose();
+                overlay.FinishOutfitCancellation();
+                return;
+            }
+
+            if (result.Status == OutfitPreviewStatus.Success && result.Image is not null)
+            {
+                resultImageToDispose = result.Image;
+                overlay.MarkOutfitApplying();
+                await Task.Yield();
+                if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
+                {
+                    overlay.FinishOutfitCancellation();
+                    return;
+                }
+
+                overlay.CompleteOutfitPreview(resultImageToDispose);
+                resultImageToDispose = null;
+                return;
+            }
+
+            string message = result.Status switch
+            {
+                OutfitPreviewStatus.ApiKeyMissing => "未配置 AI 接口",
+                OutfitPreviewStatus.TimedOut => "生成超时，请重试",
+                OutfitPreviewStatus.NetworkError => "网络连接失败",
+                OutfitPreviewStatus.NoUsableImage => "未返回可用图片",
+                _ => "生成失败，请重试"
+            };
+            overlay.ShowOutfitError(message);
+            if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify("未配置 ARK_API_KEY");
+        }
+        catch (OperationCanceledException)
+        {
+            if (!overlay.IsDisposed && !overlay.Disposing) overlay.FinishOutfitCancellation();
         }
         catch (Exception)
         {
-            ResetOverlay();
-            if (!_disposed) _notify("生成失败，请稍后重试");
+            if (!overlay.IsDisposed && !overlay.Disposing) overlay.ShowOutfitError("生成失败，请重试");
         }
+        finally
+        {
+            resultImageToDispose?.Dispose();
+            if (ReferenceEquals(_outfitRequestCancellation, cancellation)) _outfitRequestCancellation = null;
+            cancellation.Dispose();
+        }
+    }
+
+    private void OnOutfitCancellationRequested(object? sender, EventArgs e)
+    {
+        _outfitRequestCancellation?.Cancel();
     }
 
     private void OnOverlayClosed(object? sender, FormClosedEventArgs e)
     {
+        _outfitRequestCancellation?.Cancel();
         _isCapturing = false;
         _overlay = null;
     }
@@ -151,9 +221,12 @@ public sealed class ScreenshotController
             return;
         }
 
+        _outfitRequestCancellation?.Cancel();
+
         overlay.SelectionCompleted -= OnSelectionCompleted;
         overlay.TextExtractionRequested -= OnTextExtractionRequested;
         overlay.OutfitPreviewRequested -= OnOutfitPreviewRequested;
+        overlay.OutfitPreviewCancellationRequested -= OnOutfitCancellationRequested;
         overlay.CaptureCancelled -= OnCaptureCancelled;
         overlay.FormClosed -= OnOverlayClosed;
         _overlay = null;

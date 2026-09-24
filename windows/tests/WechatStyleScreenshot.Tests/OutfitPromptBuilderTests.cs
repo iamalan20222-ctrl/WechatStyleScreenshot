@@ -15,7 +15,8 @@ public class OutfitPromptBuilderTests
         Assert.Contains("same body proportions", prompt);
         Assert.Contains("same pose", prompt);
         Assert.Contains("Preserve the background", prompt);
-        Assert.Contains("Only replace clothing", prompt);
+        Assert.Contains("ONLY replace clothing", prompt);
+        Assert.Contains("same camera angle", prompt);
         Assert.Contains("adult model", prompt);
         Assert.Contains("no nudity", prompt);
         Assert.Contains("no exposed nipples", prompt);

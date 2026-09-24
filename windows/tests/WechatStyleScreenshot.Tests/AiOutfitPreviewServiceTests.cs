@@ -78,6 +78,46 @@ public class AiOutfitPreviewServiceTests
         Assert.Null(result.Image);
     }
 
+    [Fact]
+    public async Task NetworkErrorsHaveDistinctStatus()
+    {
+        using HttpClient client = new(new StubHandler((_, _) => throw new HttpRequestException()));
+        AiOutfitPreviewService service = new(client, "test-key", "test-model");
+        using Bitmap image = new(2, 2);
+
+        OutfitPreviewResult result = await service.GenerateAsync(image, new OutfitPreviewOptions());
+
+        Assert.Equal(OutfitPreviewStatus.NetworkError, result.Status);
+    }
+
+    [Fact]
+    public async Task TimeoutsHaveDistinctStatus()
+    {
+        using HttpClient client = new(new StubHandler((_, _) => throw new TaskCanceledException()));
+        AiOutfitPreviewService service = new(client, "test-key", "test-model");
+        using Bitmap image = new(2, 2);
+
+        OutfitPreviewResult result = await service.GenerateAsync(image, new OutfitPreviewOptions());
+
+        Assert.Equal(OutfitPreviewStatus.TimedOut, result.Status);
+    }
+
+    [Fact]
+    public async Task CallerCancellationPropagatesToThePendingRequest()
+    {
+        using HttpClient client = new(new StubHandler(async (_, cancellationToken) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        }));
+        AiOutfitPreviewService service = new(client, "test-key", "test-model");
+        using Bitmap image = new(2, 2);
+        using CancellationTokenSource cancellation = new(TimeSpan.FromMilliseconds(100));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.GenerateAsync(image, new OutfitPreviewOptions(), cancellation.Token));
+    }
+
     private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> response) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => response(request, cancellationToken);

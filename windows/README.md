@@ -36,7 +36,6 @@ WechatStyleScreenshot/
     Services/OutfitPreviewOptions.cs   默认随机穿搭选项
     Services/StartupManager.cs         HKCU Run 开机启动
     UI/ScreenshotOverlayForm.cs        全屏遮罩和鼠标框选
-    UI/PreviewResultForm.cs             生成结果预览、复制与保存
   tests/WechatStyleScreenshot.Tests/
     SelectionMathTests.cs
     StartupManagerTests.cs
@@ -117,9 +116,9 @@ WechatStyleScreenshot
 4. 松开鼠标。
 5. 在微信、PPT、浏览器或文档中按 `Ctrl + V` 粘贴。
 6. 普通截图中点击工具栏“文”提取并复制文字；`Alt + Shift + A` 会在框选松开后立即执行 OCR。
-7. 确认工具栏点击“试”后，确认成年与授权再生成；结果可复制、保存或重新生成。
+7. 点击确认工具栏“试”立即在原选区生成穿搭预览；选区内显示进度，完成后直接显示结果，再点“试”会从原选区原图重新随机生成；点击“✓”复制当前显示内容，生成中按 `Esc` 或点“×”取消。
 
-AI 预览需要在启动程序的进程环境中配置 `ARK_API_KEY`，默认使用 Seedream 图像编辑模型；可用 `ARK_MODEL` 覆盖模型名称。应用不会持久化密钥或截图。点击生成会把选区发送至火山方舟，服务商侧数据处理依其政策。提示词包含身份、脸部、发型、比例、姿势、背景保持与非裸露约束，但生成结果不保证完全一致，仅供设计参考。
+AI 预览需要在启动程序的进程环境中配置 `ARK_API_KEY`，默认使用 Seedream 图像编辑模型；可用 `ARK_MODEL` 覆盖模型名称。应用不会持久化密钥或截图。点击“试”会立即把选区原图发送至火山方舟，服务商侧数据处理依其政策。提示词包含身份、脸部、发型、比例、姿势、镜头角度和背景保持与非裸露约束，但生成结果不保证完全一致，仅供设计参考。请仅选择已成年且获得授权的模特图片。
 
 ```powershell
 $env:ARK_API_KEY = '<your-new-ark-api-key>'
@@ -141,7 +140,7 @@ $env:ARK_API_KEY = '<your-new-ark-api-key>'
 - 如果 `Alt + A` 被其他软件占用，托盘会弹出注册失败提示。
 - 程序需要在 STA 线程运行，项目入口已配置 `[STAThread]`。
 - DPI 感知通过 `app.manifest` 设置为 PerMonitorV2，减少缩放环境下的坐标偏差。
-- OCR 识别完全在本机运行；截图与识别文字不会上传，也不会收集。
+- OCR 识别完全在本机运行；只有用户点击“试”时，选定截图区域才会上传至火山方舟。
 
 ## 第三方许可
 

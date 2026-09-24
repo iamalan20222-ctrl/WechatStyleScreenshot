@@ -90,18 +90,18 @@ macOS 首次截图时可能需要授权：
 8. 右键、红色叉或 `Esc` 取消
 9. 确认后可直接 `Ctrl + V` 粘贴到微信、PPT、浏览器或文档
 10. 点击工具栏“文”可识别选区文字并复制到剪贴板
-11. 点击“试”可请求一张 AI 穿搭预览；支持复制、保存和重新生成
+11. 点击“试”会立即在当前选区内生成 AI 穿搭预览；可再试一款，点击“✓”复制当前结果，生成中可按 `Esc` 取消
 
 ## AI 穿搭预览
 
-Windows 确认工具栏的 `试` 使用火山方舟 Seedream 图像编辑服务。首次使用前，在启动程序的 PowerShell 会话中配置已轮换的新密钥：
+Windows 确认工具栏的 `试` 使用火山方舟 Seedream 图像编辑服务。点击后会在当前选区内立即生成，不会打开新窗口。首次使用前，在启动程序的 PowerShell 会话中配置密钥：
 
 ```powershell
 $env:ARK_API_KEY = '<your-new-ark-api-key>'
 .\publish\WechatStyleScreenshot.exe
 ```
 
-可选模型变量为 `ARK_MODEL`，默认 `doubao-seedream-5-0-pro-260628`。密钥仅从进程环境读取，不写入仓库、日志或注册表。点击生成前需确认模特为成年人且图片使用已获授权。原截图仅为本次请求暂存在内存；生成图也只在内存保留，除非用户主动保存。选择区域会上传给服务商；服务商的处理、日志和保留受其政策约束，本程序无法保证服务商不留存。
+可选模型变量为 `ARK_MODEL`，默认 `doubao-seedream-5-0-pro-260628`。密钥仅从进程环境读取，不写入仓库、日志或注册表。点击“试”会将选区原图上传给服务商；请仅处理已成年且有授权的模特图片。原截图及生成图只在内存保留；点击“✓”才将当前预览复制到剪贴板。服务商侧处理、日志与保留依其政策，本程序无法保证服务商不留存。
 
 该功能仅供设计灵感与穿搭参考，非真实打版或合身结果。提示词要求保持身份、脸部、发型、体型、姿势和背景，并禁止裸露及情色内容，但生成模型无法保证像素级身份或身体结构不变。请仅处理已成年且有授权的模特图片。
 
@@ -113,7 +113,7 @@ Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。m
 
 ## 隐私
 
-OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: it uploads only the selected region after the user clicks Generate and confirms adult-model authorization. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
+OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: clicking “试” immediately uploads the selected region. Use only authorized adult-model images. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
 
 ## 项目结构
 

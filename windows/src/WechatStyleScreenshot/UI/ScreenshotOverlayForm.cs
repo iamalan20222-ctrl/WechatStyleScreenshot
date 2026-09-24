@@ -1,4 +1,7 @@
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Diagnostics;
 using WechatStyleScreenshot.Core;
 
 namespace WechatStyleScreenshot.UI;
@@ -16,6 +19,9 @@ public sealed class ScreenshotOverlayForm : Form
     private readonly Rectangle _virtualBounds;
     private readonly Bitmap _desktopSnapshot;
     private readonly bool _extractTextOnSelection;
+    private readonly System.Windows.Forms.Timer _outfitTimer;
+    private readonly ToolTip _toolTip = new();
+    private OutfitPreviewSession? _outfitSession;
     private Rectangle _selection;
     private Rectangle _toolbarBounds;
     private Rectangle _cancelButtonBounds;
@@ -31,10 +37,15 @@ public sealed class ScreenshotOverlayForm : Form
     private bool _isDragging;
     private bool _hasSelection;
     private bool _isAdjusting;
+    private bool _outfitCancellationRequested;
+    private long _outfitStartedAt;
+    private DateTime _outfitErrorExpiresAt;
+    private int _loadingFrame;
 
     public event EventHandler<Rectangle>? SelectionCompleted;
     public event EventHandler<Rectangle>? TextExtractionRequested;
-    public event EventHandler<Rectangle>? OutfitPreviewRequested;
+    public event EventHandler? OutfitPreviewRequested;
+    public event EventHandler? OutfitPreviewCancellationRequested;
     public event EventHandler? CaptureCancelled;
 
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false)
@@ -42,6 +53,8 @@ public sealed class ScreenshotOverlayForm : Form
         _virtualBounds = virtualBounds;
         _desktopSnapshot = desktopSnapshot;
         _extractTextOnSelection = extractTextOnSelection;
+        _outfitTimer = new System.Windows.Forms.Timer { Interval = 100 };
+        _outfitTimer.Tick += OnOutfitTimerTick;
 
         AutoScaleMode = AutoScaleMode.None;
         BackColor = Color.Black;
@@ -60,6 +73,15 @@ public sealed class ScreenshotOverlayForm : Form
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
+
+        if (_outfitSession?.IsBusy == true)
+        {
+            if (e.Button == MouseButtons.Right || (e.Button == MouseButtons.Left && _cancelButtonBounds.Contains(e.Location)))
+            {
+                RequestOutfitCancellation();
+            }
+            return;
+        }
 
         SelectionMouseAction action = SelectionMath.GetMouseAction(e.Button, e.Clicks, _hasSelection);
         if (action == SelectionMouseAction.Cancel)
@@ -119,6 +141,7 @@ public sealed class ScreenshotOverlayForm : Form
 
         _hasSelection = false;
         _isDragging = true;
+        ResetOutfitForSelection();
         _dragStart = e.Location;
         _dragCurrent = e.Location;
         Invalidate();
@@ -127,6 +150,12 @@ public sealed class ScreenshotOverlayForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+
+        if (_outfitSession?.IsBusy == true)
+        {
+            Cursor = Cursors.Default;
+            return;
+        }
 
         if (_isAdjusting)
         {
@@ -143,6 +172,10 @@ public sealed class ScreenshotOverlayForm : Form
             {
                 ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
                 UpdateHoveredToolbarButton(hoveredButton);
+                if (hoveredButton == ToolbarButtonHit.OutfitPreview)
+                    _toolTip.Show("再试一款", this, e.X + 8, e.Y + 8, 900);
+                else
+                    _toolTip.Hide(this);
                 Cursor = hoveredButton == ToolbarButtonHit.None
                     ? GetCursorForTarget(SelectionMath.HitTest(_selection, e.Location, HandleSize + 6))
                     : Cursors.Default;
@@ -164,6 +197,10 @@ public sealed class ScreenshotOverlayForm : Form
             _isAdjusting = false;
             _activeTarget = SelectionHitTarget.None;
             Cursor = Cursors.Cross;
+            if (_selection != _adjustOriginalSelection)
+            {
+                ResetOutfitForSelection();
+            }
             Invalidate();
             return;
         }
@@ -180,12 +217,14 @@ public sealed class ScreenshotOverlayForm : Form
         if (!SelectionMath.IsCapturable(localSelection))
         {
             _hasSelection = false;
+            ResetOutfitForSelection();
             Invalidate();
             return;
         }
 
         _selection = localSelection;
         _hasSelection = true;
+        ResetOutfitForSelection();
         _hoveredToolbarButton = ToolbarButtonHit.None;
         if (_extractTextOnSelection)
         {
@@ -233,14 +272,13 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void RequestOutfitPreview()
     {
-        if (!_hasSelection || !SelectionMath.IsCapturable(_selection)) return;
-        Rectangle screenSelection = new(
-            _selection.X + _virtualBounds.X,
-            _selection.Y + _virtualBounds.Y,
-            _selection.Width,
-            _selection.Height);
-        Hide();
-        OutfitPreviewRequested?.Invoke(this, screenSelection);
+        if (!_hasSelection || !SelectionMath.IsCapturable(_selection) || _outfitSession is null || !_outfitSession.TryBegin()) return;
+        _outfitCancellationRequested = false;
+        _outfitStartedAt = Stopwatch.GetTimestamp();
+        _loadingFrame = 0;
+        _outfitTimer.Start();
+        Invalidate(_selection);
+        OutfitPreviewRequested?.Invoke(this, EventArgs.Empty);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -249,9 +287,14 @@ public sealed class ScreenshotOverlayForm : Form
 
         if (e.KeyCode == Keys.Escape)
         {
-            CancelCapture();
+            if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
+            else CancelCapture();
         }
-        else if (e.KeyCode == Keys.Enter && _hasSelection)
+        else if (e.Control && e.KeyCode == Keys.Z)
+        {
+            RestoreOutfitOriginal();
+        }
+        else if (e.KeyCode == Keys.Enter && _hasSelection && _outfitSession?.IsBusy != true)
         {
             ConfirmSelection();
         }
@@ -272,11 +315,14 @@ public sealed class ScreenshotOverlayForm : Form
         }
 
         Rectangle selection = _hasSelection ? _selection : SelectionMath.FromPoints(_dragStart, _dragCurrent);
-        e.Graphics.DrawImage(
-            _desktopSnapshot,
-            selection,
-            selection,
-            GraphicsUnit.Pixel);
+        if (_outfitSession?.HasResult == true && _outfitSession.ResultImage is Bitmap outfitResult)
+        {
+            DrawImageCover(e.Graphics, outfitResult, selection);
+        }
+        else
+        {
+            e.Graphics.DrawImage(_desktopSnapshot, selection, selection, GraphicsUnit.Pixel);
+        }
 
         using Pen borderPen = new(AccentColor, 2)
         {
@@ -295,6 +341,11 @@ public sealed class ScreenshotOverlayForm : Form
             DrawSizeLabel(e.Graphics, selection);
         }
 
+        if (_outfitSession is { State: not OutfitPreviewState.None and not OutfitPreviewState.Success })
+        {
+            DrawOutfitStatus(e.Graphics, selection);
+        }
+
         if (_hasSelection)
         {
             DrawToolbar(e.Graphics);
@@ -305,6 +356,11 @@ public sealed class ScreenshotOverlayForm : Form
     {
         if (disposing)
         {
+            _outfitTimer.Stop();
+            _outfitTimer.Dispose();
+            _toolTip.Dispose();
+            _outfitSession?.Dispose();
+            _outfitSession = null;
             _desktopSnapshot.Dispose();
         }
 
@@ -345,6 +401,183 @@ public sealed class ScreenshotOverlayForm : Form
         _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _confirmButtonBounds = new Rectangle(_toolbarBounds.Right - 16 - ToolbarButtonSize, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+    }
+
+    public Bitmap CreateOutfitRequestImage()
+    {
+        if (_outfitSession is null || _outfitSession.State != OutfitPreviewState.Preparing)
+        {
+            throw new InvalidOperationException("No outfit preview request is being prepared.");
+        }
+
+        return _outfitSession.CreateRequestImage();
+    }
+
+    public void MarkOutfitGenerating()
+    {
+        if (IsDisposed || Disposing || _outfitSession is null) return;
+        _outfitSession.MarkGenerating();
+        Invalidate(_selection);
+    }
+
+    public void MarkOutfitApplying()
+    {
+        if (IsDisposed || Disposing || _outfitSession is null) return;
+        _outfitSession.MarkApplying();
+        Invalidate(_selection);
+    }
+
+    public void CompleteOutfitPreview(Bitmap resultImage)
+    {
+        if (IsDisposed || Disposing || _outfitSession is null)
+        {
+            resultImage.Dispose();
+            return;
+        }
+
+        _outfitSession.Complete(resultImage);
+        _outfitCancellationRequested = false;
+        _outfitTimer.Stop();
+        Invalidate(_selection);
+    }
+
+    public void ShowOutfitError(string message)
+    {
+        if (IsDisposed || Disposing || _outfitSession is null) return;
+        _outfitSession.Fail(message);
+        _outfitCancellationRequested = false;
+        _outfitErrorExpiresAt = DateTime.UtcNow.AddSeconds(3);
+        _outfitTimer.Start();
+        Invalidate(_selection);
+    }
+
+    public void FinishOutfitCancellation()
+    {
+        if (IsDisposed || Disposing || _outfitSession is null) return;
+        _outfitSession.Cancel();
+        _outfitCancellationRequested = false;
+        _outfitTimer.Stop();
+        Invalidate(_selection);
+    }
+
+    public Bitmap? CreateOutfitResultImage()
+    {
+        return _outfitSession?.HasResult == true ? _outfitSession.CreateConfirmationImage() : null;
+    }
+
+    private void RequestOutfitCancellation()
+    {
+        if (_outfitSession?.IsBusy != true || _outfitCancellationRequested) return;
+        _outfitCancellationRequested = true;
+        Invalidate(_selection);
+        OutfitPreviewCancellationRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void RestoreOutfitOriginal()
+    {
+        if (_outfitSession?.HasResult != true || _outfitSession.IsBusy) return;
+        _outfitSession.RestoreOriginal();
+        _outfitTimer.Stop();
+        Invalidate(_selection);
+    }
+
+    private void ResetOutfitForSelection()
+    {
+        _outfitTimer.Stop();
+        _outfitSession?.Dispose();
+        _outfitSession = null;
+        _outfitCancellationRequested = false;
+        if (_hasSelection && SelectionMath.IsCapturable(_selection))
+        {
+            using Bitmap original = _desktopSnapshot.Clone(_selection, PixelFormat.Format32bppArgb);
+            _outfitSession = new OutfitPreviewSession(original);
+        }
+    }
+
+    private void OnOutfitTimerTick(object? sender, EventArgs e)
+    {
+        if (IsDisposed || Disposing) return;
+        if (_outfitSession?.IsBusy == true)
+        {
+            _loadingFrame = (_loadingFrame + 1) % 16;
+            Invalidate(_selection);
+            return;
+        }
+
+        if (_outfitSession?.State == OutfitPreviewState.Error && DateTime.UtcNow >= _outfitErrorExpiresAt)
+        {
+            _outfitSession.ClearError();
+            _outfitTimer.Stop();
+            Invalidate(_selection);
+        }
+        else if (_outfitSession?.State != OutfitPreviewState.Error)
+        {
+            _outfitTimer.Stop();
+        }
+    }
+
+    private void DrawOutfitStatus(Graphics graphics, Rectangle selection)
+    {
+        using SolidBrush shade = new(Color.FromArgb(100, Color.Black));
+        graphics.FillRectangle(shade, selection);
+        string message = _outfitSession!.State switch
+        {
+            OutfitPreviewState.Preparing => "正在准备图片…",
+            OutfitPreviewState.Generating => _outfitCancellationRequested ? "正在取消…" : "AI 正在替换穿搭" + new string('.', _loadingFrame / 4 % 3 + 1),
+            OutfitPreviewState.Applying => "正在应用生成结果…",
+            OutfitPreviewState.Error => _outfitSession.ErrorMessage ?? "生成失败，请重试",
+            _ => string.Empty
+        };
+
+        using Font font = new("Microsoft YaHei UI", 12f, FontStyle.Bold, GraphicsUnit.Point);
+        using SolidBrush text = new(Color.White);
+        using StringFormat centered = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        Rectangle messageBounds = new(selection.Left + 6, selection.Top + selection.Height / 2 - 14, Math.Max(1, selection.Width - 12), 30);
+        graphics.DrawString(message, font, text, messageBounds, centered);
+
+        if (_outfitSession.IsBusy)
+        {
+            int centerX = selection.Left + selection.Width / 2;
+            int centerY = selection.Top + selection.Height / 2;
+            using Pen spinner = new(Color.White, 3) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            graphics.DrawArc(spinner, centerX - 11, centerY - 48, 22, 22, _loadingFrame * 24, 260);
+            int elapsed = (int)Stopwatch.GetElapsedTime(_outfitStartedAt).TotalSeconds;
+            graphics.DrawString($"已等待 {elapsed} 秒", font, text, new Rectangle(selection.Left + 4, centerY + 19, Math.Max(1, selection.Width - 8), 24), centered);
+            int barWidth = Math.Min(150, Math.Max(40, selection.Width - 24));
+            int barLeft = centerX - barWidth / 2;
+            int barTop = centerY + 48;
+            using SolidBrush track = new(Color.FromArgb(130, Color.White));
+            using SolidBrush segment = new(Color.FromArgb(220, Color.White));
+            graphics.FillRectangle(track, barLeft, barTop, barWidth, 4);
+            int segmentWidth = Math.Max(12, barWidth / 4);
+            int offset = (int)((_loadingFrame / 16f) * (barWidth + segmentWidth)) - segmentWidth;
+            GraphicsState clipState = graphics.Save();
+            graphics.SetClip(selection);
+            graphics.FillRectangle(segment, barLeft + offset, barTop, segmentWidth, 4);
+            graphics.Restore(clipState);
+        }
+    }
+
+    private static void DrawImageCover(Graphics graphics, Image image, Rectangle destination)
+    {
+        float sourceAspect = image.Width / (float)image.Height;
+        float destinationAspect = destination.Width / (float)destination.Height;
+        float sourceX = 0, sourceY = 0, sourceWidth = image.Width, sourceHeight = image.Height;
+        if (sourceAspect > destinationAspect)
+        {
+            sourceWidth = image.Height * destinationAspect;
+            sourceX = (image.Width - sourceWidth) / 2;
+        }
+        else
+        {
+            sourceHeight = image.Width / destinationAspect;
+            sourceY = (image.Height - sourceHeight) / 2;
+        }
+
+        GraphicsState state = graphics.Save();
+        graphics.SetClip(destination);
+        graphics.DrawImage(image, destination, sourceX, sourceY, sourceWidth, sourceHeight, GraphicsUnit.Pixel);
+        graphics.Restore(state);
     }
 
     private void DrawToolbar(Graphics graphics)

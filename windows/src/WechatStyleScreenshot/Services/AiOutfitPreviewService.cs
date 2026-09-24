@@ -7,7 +7,7 @@ using System.Text.Json;
 
 namespace WechatStyleScreenshot.Services;
 
-public enum OutfitPreviewStatus { Success, ApiKeyMissing, NoUsableImage, Failed }
+public enum OutfitPreviewStatus { Success, ApiKeyMissing, NoUsableImage, NetworkError, TimedOut, Failed }
 
 public sealed record OutfitPreviewResult(OutfitPreviewStatus Status, Bitmap? Image = null);
 
@@ -34,9 +34,8 @@ public sealed class AiOutfitPreviewService : IDisposable
 
         try
         {
-            using MemoryStream imageStream = new();
-            source.Save(imageStream, ImageFormat.Png);
-            if (imageStream.Length > 25 * 1024 * 1024) return new(OutfitPreviewStatus.Failed);
+            string? imageDataUri = await Task.Run(() => CreateImageDataUri(source), cancellationToken).ConfigureAwait(false);
+            if (imageDataUri is null) return new(OutfitPreviewStatus.Failed);
 
             using HttpRequestMessage request = new(HttpMethod.Post, Endpoint);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
@@ -44,7 +43,7 @@ public sealed class AiOutfitPreviewService : IDisposable
             {
                 model = _model,
                 prompt = OutfitPromptBuilder.Build(options),
-                image = $"data:image/png;base64,{Convert.ToBase64String(imageStream.ToArray())}",
+                image = imageDataUri,
                 size = "1K",
                 output_format = "png",
                 response_format = "b64_json",
@@ -52,6 +51,8 @@ public sealed class AiOutfitPreviewService : IDisposable
             });
 
             using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode is System.Net.HttpStatusCode.RequestTimeout or System.Net.HttpStatusCode.GatewayTimeout)
+                return new(OutfitPreviewStatus.TimedOut);
             if (!response.IsSuccessStatusCode) return new(OutfitPreviewStatus.Failed);
 
             await using Stream responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
@@ -74,7 +75,15 @@ public sealed class AiOutfitPreviewService : IDisposable
         {
             throw;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or ArgumentException or InvalidOperationException or OutOfMemoryException or ExternalException)
+        catch (TaskCanceledException)
+        {
+            return new(OutfitPreviewStatus.TimedOut);
+        }
+        catch (HttpRequestException)
+        {
+            return new(OutfitPreviewStatus.NetworkError);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or OutOfMemoryException or ExternalException)
         {
             return new(OutfitPreviewStatus.Failed);
         }
@@ -83,5 +92,14 @@ public sealed class AiOutfitPreviewService : IDisposable
     public void Dispose()
     {
         if (_ownsClient) _httpClient.Dispose();
+    }
+
+    private static string? CreateImageDataUri(Bitmap source)
+    {
+        using MemoryStream imageStream = new();
+        source.Save(imageStream, ImageFormat.Png);
+        return imageStream.Length > 25 * 1024 * 1024
+            ? null
+            : $"data:image/png;base64,{Convert.ToBase64String(imageStream.ToArray())}";
     }
 }
