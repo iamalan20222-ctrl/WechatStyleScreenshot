@@ -4,6 +4,8 @@
 
 ### Added
 
+- Windows 截图确认工具栏新增“试”入口，支持火山方舟 AI 穿搭预览、复制、保存和重新生成
+- AI 穿搭 prompt 身份保持与非裸露约束、成年人和授权确认及云端处理提示
 - Windows 本地 Tesseract 5 OCR，支持简体中文和英文
 - Windows 截图工具栏 OCR 操作与 `Alt + Shift + A` 直接提取快捷键
 - macOS Vision OCR 与 `Option + Shift + A` 快捷键

@@ -10,6 +10,7 @@ public sealed class ScreenshotController
     private readonly ScreenCaptureEngine _captureEngine;
     private readonly ClipboardManager _clipboardManager;
     private readonly OcrService _ocrService;
+    private readonly AiOutfitPreviewService _outfitPreviewService;
     private readonly Action<string> _notify;
     private ScreenshotOverlayForm? _overlay;
     private bool _isCapturing;
@@ -19,11 +20,13 @@ public sealed class ScreenshotController
         ScreenCaptureEngine captureEngine,
         ClipboardManager clipboardManager,
         OcrService ocrService,
-        Action<string> notify)
+        Action<string> notify,
+        AiOutfitPreviewService? outfitPreviewService = null)
     {
         _captureEngine = captureEngine;
         _clipboardManager = clipboardManager;
         _ocrService = ocrService;
+        _outfitPreviewService = outfitPreviewService ?? new AiOutfitPreviewService();
         _notify = notify;
     }
 
@@ -42,6 +45,7 @@ public sealed class ScreenshotController
         _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
+        _overlay.OutfitPreviewRequested += OnOutfitPreviewRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
         _overlay.FormClosed += OnOverlayClosed;
         _overlay.Show();
@@ -115,6 +119,23 @@ public sealed class ScreenshotController
         ResetOverlay();
     }
 
+    private void OnOutfitPreviewRequested(object? sender, Rectangle selection)
+    {
+        try
+        {
+            Application.DoEvents();
+            Bitmap selectedImage = _captureEngine.Capture(selection);
+            ResetOverlay();
+            PreviewResultForm form = new(selectedImage, _outfitPreviewService, _clipboardManager);
+            form.Show();
+        }
+        catch (Exception)
+        {
+            ResetOverlay();
+            if (!_disposed) _notify("生成失败，请稍后重试");
+        }
+    }
+
     private void OnOverlayClosed(object? sender, FormClosedEventArgs e)
     {
         _isCapturing = false;
@@ -132,6 +153,7 @@ public sealed class ScreenshotController
 
         overlay.SelectionCompleted -= OnSelectionCompleted;
         overlay.TextExtractionRequested -= OnTextExtractionRequested;
+        overlay.OutfitPreviewRequested -= OnOutfitPreviewRequested;
         overlay.CaptureCancelled -= OnCaptureCancelled;
         overlay.FormClosed -= OnOverlayClosed;
         _overlay = null;
@@ -159,5 +181,6 @@ public sealed class ScreenshotController
         _disposed = true;
         ResetOverlay();
         _ocrService.Dispose();
+        _outfitPreviewService.Dispose();
     }
 }

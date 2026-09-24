@@ -31,8 +31,12 @@ WechatStyleScreenshot/
     Services/HotkeyManager.cs          RegisterHotKey 全局快捷键
     Services/ScreenCaptureEngine.cs    Graphics.CopyFromScreen 截图
     Services/ClipboardManager.cs       Clipboard.SetImage 写入剪贴板
+    Services/AiOutfitPreviewService.cs 火山方舟图像编辑 API
+    Services/OutfitPromptBuilder.cs    穿搭 prompt 与安全约束
+    Services/OutfitPreviewOptions.cs   默认随机穿搭选项
     Services/StartupManager.cs         HKCU Run 开机启动
     UI/ScreenshotOverlayForm.cs        全屏遮罩和鼠标框选
+    UI/PreviewResultForm.cs             生成结果预览、复制与保存
   tests/WechatStyleScreenshot.Tests/
     SelectionMathTests.cs
     StartupManagerTests.cs
@@ -113,6 +117,14 @@ WechatStyleScreenshot
 4. 松开鼠标。
 5. 在微信、PPT、浏览器或文档中按 `Ctrl + V` 粘贴。
 6. 普通截图中点击工具栏“文”提取并复制文字；`Alt + Shift + A` 会在框选松开后立即执行 OCR。
+7. 确认工具栏点击“试”后，确认成年与授权再生成；结果可复制、保存或重新生成。
+
+AI 预览需要在启动程序的进程环境中配置 `ARK_API_KEY`，默认使用 Seedream 图像编辑模型；可用 `ARK_MODEL` 覆盖模型名称。应用不会持久化密钥或截图。点击生成会把选区发送至火山方舟，服务商侧数据处理依其政策。提示词包含身份、脸部、发型、比例、姿势、背景保持与非裸露约束，但生成结果不保证完全一致，仅供设计参考。
+
+```powershell
+$env:ARK_API_KEY = '<your-new-ark-api-key>'
+.\publish\WechatStyleScreenshot.exe
+```
 
 ## 设计说明
 

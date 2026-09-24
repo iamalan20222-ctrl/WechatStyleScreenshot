@@ -6,6 +6,7 @@
 
 - Windows：`Alt + A` 唤醒截图
 - Windows：`Alt + Shift + A` 直接框选并提取文字
+- Windows：确认工具栏“试”可生成 AI 内衣穿搭预览
 - macOS：`Option + A` 唤醒截图
 - macOS：`Option + Shift + A` 直接框选并提取文字
 - 框选区域后进入确认态
@@ -89,6 +90,20 @@ macOS 首次截图时可能需要授权：
 8. 右键、红色叉或 `Esc` 取消
 9. 确认后可直接 `Ctrl + V` 粘贴到微信、PPT、浏览器或文档
 10. 点击工具栏“文”可识别选区文字并复制到剪贴板
+11. 点击“试”可请求一张 AI 穿搭预览；支持复制、保存和重新生成
+
+## AI 穿搭预览
+
+Windows 确认工具栏的 `试` 使用火山方舟 Seedream 图像编辑服务。首次使用前，在启动程序的 PowerShell 会话中配置已轮换的新密钥：
+
+```powershell
+$env:ARK_API_KEY = '<your-new-ark-api-key>'
+.\publish\WechatStyleScreenshot.exe
+```
+
+可选模型变量为 `ARK_MODEL`，默认 `doubao-seedream-5-0-pro-260628`。密钥仅从进程环境读取，不写入仓库、日志或注册表。点击生成前需确认模特为成年人且图片使用已获授权。原截图仅为本次请求暂存在内存；生成图也只在内存保留，除非用户主动保存。选择区域会上传给服务商；服务商的处理、日志和保留受其政策约束，本程序无法保证服务商不留存。
+
+该功能仅供设计灵感与穿搭参考，非真实打版或合身结果。提示词要求保持身份、脸部、发型、体型、姿势和背景，并禁止裸露及情色内容，但生成模型无法保证像素级身份或身体结构不变。请仅处理已成年且有授权的模特图片。
 
 ## OCR 文字提取
 
@@ -98,7 +113,7 @@ Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。m
 
 ## 隐私
 
-OCR recognition runs locally on the device. Screenshots are not uploaded. OCR content is not collected. No account or API key is required.
+OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: it uploads only the selected region after the user clicks Generate and confirms adult-model authorization. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
 
 ## 项目结构
 

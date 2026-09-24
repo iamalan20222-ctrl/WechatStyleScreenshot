@@ -23,7 +23,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             new ScreenCaptureEngine(),
             new ClipboardManager(),
             new OcrService(),
-            ShowOcrNotification);
+            ShowOcrNotification,
+            new AiOutfitPreviewService());
         _hotkeyManager.HotkeyPressed += (_, args) => _screenshotController.BeginCapture(args.Action == HotkeyAction.Ocr);
 
         ToolStripMenuItem startupItem = new("开机启动")
