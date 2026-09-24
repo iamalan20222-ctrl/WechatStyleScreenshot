@@ -173,16 +173,11 @@ public sealed class ScreenshotController
                 return;
             }
 
-            string message = result.Status switch
-            {
-                OutfitPreviewStatus.ApiKeyMissing => "未配置 AI 接口",
-                OutfitPreviewStatus.TimedOut => "生成超时，请重试",
-                OutfitPreviewStatus.NetworkError => "网络连接失败",
-                OutfitPreviewStatus.NoUsableImage => "未返回可用图片",
-                _ => "生成失败，请重试"
-            };
+            string message = BuildOutfitErrorMessage(result);
             overlay.ShowOutfitError(message);
             if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify("未配置 ARK_API_KEY");
+            else if (result.HttpStatusCode is not null)
+                _notify(BuildOutfitDiagnostic(result));
         }
         catch (OperationCanceledException)
         {
@@ -203,6 +198,36 @@ public sealed class ScreenshotController
     private void OnOutfitCancellationRequested(object? sender, EventArgs e)
     {
         _outfitRequestCancellation?.Cancel();
+    }
+
+    private static string BuildOutfitErrorMessage(OutfitPreviewResult result)
+    {
+        string message = result.Status switch
+        {
+            OutfitPreviewStatus.ApiKeyMissing => "未配置 AI 接口",
+            OutfitPreviewStatus.RateLimited => "请求过于频繁，请稍后重试",
+            OutfitPreviewStatus.TimedOut => "生成超时，请重试",
+            OutfitPreviewStatus.NetworkError => "网络连接失败",
+            OutfitPreviewStatus.SafetyRejected => "请求未通过内容安全审核",
+            OutfitPreviewStatus.QuotaExceeded => "接口额度不足",
+            OutfitPreviewStatus.InvalidRequest => "请求参数无效",
+            OutfitPreviewStatus.ServerError => "AI 服务暂时不可用",
+            OutfitPreviewStatus.NoUsableImage => "未返回可用图片",
+            _ => "生成失败，请重试"
+        };
+
+        string diagnostic = BuildOutfitDiagnostic(result);
+        return string.IsNullOrEmpty(diagnostic) ? message : $"{message}（{diagnostic}）";
+    }
+
+    private static string BuildOutfitDiagnostic(OutfitPreviewResult result)
+    {
+        List<string> parts = [];
+        if (result.HttpStatusCode is int statusCode) parts.Add($"HTTP {statusCode}");
+        if (!string.IsNullOrWhiteSpace(result.ProviderCode)) parts.Add(result.ProviderCode);
+        if (result.RetryAfterSeconds is int retryAfter) parts.Add($"{retryAfter}s 后重试");
+        if (!string.IsNullOrWhiteSpace(result.RequestId)) parts.Add($"请求 ID {result.RequestId}");
+        return string.Join(" · ", parts);
     }
 
     private void OnOverlayClosed(object? sender, FormClosedEventArgs e)
