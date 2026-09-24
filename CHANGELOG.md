@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Windows 本地 Tesseract 5 OCR，支持简体中文和英文
+- Windows 截图工具栏 OCR 操作与 `Alt + Shift + A` 直接提取快捷键
+- macOS Vision OCR 与 `Option + Shift + A` 快捷键
+- OCR 结果自动复制到剪贴板，并在空结果或失败时显示轻量提示
+- OCR 依赖与中英模型随 Windows 发布包携带
+- OCR 隐私说明：识别在本机完成，截图不会上传
+
 ## 1.0.0
 
 - Windows 支持 `Alt + A` 全局截图
@@ -10,4 +21,3 @@
 - Windows 支持托盘菜单和开机启动
 - macOS 支持 `Option + A` 调用系统交互截图并复制到剪贴板
 - macOS 支持菜单栏常驻和登录启动脚本
-

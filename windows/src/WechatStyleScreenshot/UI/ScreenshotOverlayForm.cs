@@ -6,7 +6,7 @@ namespace WechatStyleScreenshot.UI;
 public sealed class ScreenshotOverlayForm : Form
 {
     private const int HandleSize = 9;
-    private const int ToolbarWidth = 116;
+    private const int ToolbarWidth = 156;
     private const int ToolbarHeight = 46;
     private const int ToolbarGap = 14;
     private const int ToolbarButtonSize = 30;
@@ -15,9 +15,11 @@ public sealed class ScreenshotOverlayForm : Form
 
     private readonly Rectangle _virtualBounds;
     private readonly Bitmap _desktopSnapshot;
+    private readonly bool _extractTextOnSelection;
     private Rectangle _selection;
     private Rectangle _toolbarBounds;
     private Rectangle _cancelButtonBounds;
+    private Rectangle _ocrButtonBounds;
     private Rectangle _confirmButtonBounds;
     private Point _dragStart;
     private Point _dragCurrent;
@@ -30,12 +32,14 @@ public sealed class ScreenshotOverlayForm : Form
     private bool _isAdjusting;
 
     public event EventHandler<Rectangle>? SelectionCompleted;
+    public event EventHandler<Rectangle>? TextExtractionRequested;
     public event EventHandler? CaptureCancelled;
 
-    public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot)
+    public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false)
     {
         _virtualBounds = virtualBounds;
         _desktopSnapshot = desktopSnapshot;
+        _extractTextOnSelection = extractTextOnSelection;
 
         AutoScaleMode = AutoScaleMode.None;
         BackColor = Color.Black;
@@ -87,6 +91,12 @@ public sealed class ScreenshotOverlayForm : Form
                 return;
             }
 
+            if (_ocrButtonBounds.Contains(e.Location))
+            {
+                RequestTextExtraction();
+                return;
+            }
+
             SelectionHitTarget target = SelectionMath.HitTest(_selection, e.Location, HandleSize + 6);
             if (target != SelectionHitTarget.None)
             {
@@ -123,7 +133,7 @@ public sealed class ScreenshotOverlayForm : Form
         {
             if (_hasSelection)
             {
-                ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _confirmButtonBounds, e.Location);
+                ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _confirmButtonBounds, e.Location);
                 UpdateHoveredToolbarButton(hoveredButton);
                 Cursor = hoveredButton == ToolbarButtonHit.None
                     ? GetCursorForTarget(SelectionMath.HitTest(_selection, e.Location, HandleSize + 6))
@@ -169,6 +179,12 @@ public sealed class ScreenshotOverlayForm : Form
         _selection = localSelection;
         _hasSelection = true;
         _hoveredToolbarButton = ToolbarButtonHit.None;
+        if (_extractTextOnSelection)
+        {
+            RequestTextExtraction();
+            return;
+        }
+
         UpdateToolbarBounds();
         Invalidate();
     }
@@ -188,6 +204,23 @@ public sealed class ScreenshotOverlayForm : Form
 
         Hide();
         SelectionCompleted?.Invoke(this, screenSelection);
+    }
+
+    private void RequestTextExtraction()
+    {
+        if (!_hasSelection || !SelectionMath.IsCapturable(_selection))
+        {
+            return;
+        }
+
+        Rectangle screenSelection = new(
+            _selection.X + _virtualBounds.X,
+            _selection.Y + _virtualBounds.Y,
+            _selection.Width,
+            _selection.Height);
+
+        Hide();
+        TextExtractionRequested?.Invoke(this, screenSelection);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -289,6 +322,7 @@ public sealed class ScreenshotOverlayForm : Form
         y = Math.Clamp(y, 8, ClientRectangle.Bottom - ToolbarHeight - 8);
         _toolbarBounds = new Rectangle(x, y, ToolbarWidth, ToolbarHeight);
         _cancelButtonBounds = new Rectangle(_toolbarBounds.Left + 16, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _confirmButtonBounds = new Rectangle(_toolbarBounds.Right - 16 - ToolbarButtonSize, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
     }
 
@@ -302,6 +336,12 @@ public sealed class ScreenshotOverlayForm : Form
         DrawButtonHover(graphics, _cancelButtonBounds, ToolbarButtonHit.Cancel);
         graphics.DrawLine(cancelPen, _cancelButtonBounds.Left + 8, _cancelButtonBounds.Top + 8, _cancelButtonBounds.Right - 8, _cancelButtonBounds.Bottom - 8);
         graphics.DrawLine(cancelPen, _cancelButtonBounds.Right - 8, _cancelButtonBounds.Top + 8, _cancelButtonBounds.Left + 8, _cancelButtonBounds.Bottom - 8);
+
+        DrawButtonHover(graphics, _ocrButtonBounds, ToolbarButtonHit.Ocr);
+        using Font ocrFont = new("Microsoft YaHei UI", 12f, FontStyle.Bold, GraphicsUnit.Point);
+        using SolidBrush ocrBrush = new(Color.WhiteSmoke);
+        using StringFormat ocrFormat = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        graphics.DrawString("文", ocrFont, ocrBrush, _ocrButtonBounds, ocrFormat);
 
         using Pen confirmPen = new(AccentColor, 3);
         DrawButtonHover(graphics, _confirmButtonBounds, ToolbarButtonHit.Confirm);

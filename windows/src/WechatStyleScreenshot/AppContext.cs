@@ -12,9 +12,19 @@ public sealed class TrayApplicationContext : ApplicationContext
     public TrayApplicationContext()
     {
         _startupManager = StartupManager.CreateDefault();
-        _screenshotController = new ScreenshotController(new ScreenCaptureEngine(), new ClipboardManager());
         _hotkeyManager = new HotkeyManager();
-        _hotkeyManager.HotkeyPressed += (_, _) => _screenshotController.BeginCapture();
+        _notifyIcon = new NotifyIcon
+        {
+            Icon = SystemIcons.Application,
+            Text = "Alt + A 截图",
+            Visible = true
+        };
+        _screenshotController = new ScreenshotController(
+            new ScreenCaptureEngine(),
+            new ClipboardManager(),
+            new OcrService(),
+            ShowOcrNotification);
+        _hotkeyManager.HotkeyPressed += (_, args) => _screenshotController.BeginCapture(args.Action == HotkeyAction.Ocr);
 
         ToolStripMenuItem startupItem = new("开机启动")
         {
@@ -35,26 +45,32 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         ContextMenuStrip menu = new();
         menu.Items.Add("Alt + A 截图", null, (_, _) => _screenshotController.BeginCapture());
+        menu.Items.Add("Alt + Shift + A 提取文字", null, (_, _) => _screenshotController.BeginCapture(extractTextOnSelection: true));
         menu.Items.Add(startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (_, _) => ExitThread());
 
-        _notifyIcon = new NotifyIcon
-        {
-            ContextMenuStrip = menu,
-            Icon = SystemIcons.Application,
-            Text = "Alt + A 截图",
-            Visible = true
-        };
+        _notifyIcon.ContextMenuStrip = menu;
 
+        RegisterHotkey(_hotkeyManager.RegisterScreenshotHotkey, "Alt + A");
+        RegisterHotkey(_hotkeyManager.RegisterOcrHotkey, "Alt + Shift + A");
+    }
+
+    private void RegisterHotkey(Action register, string label)
+    {
         try
         {
-            _hotkeyManager.RegisterAltA();
+            register();
         }
         catch (Exception ex)
         {
-            _notifyIcon.ShowBalloonTip(5000, "Alt + A 注册失败", ex.Message, ToolTipIcon.Warning);
+            _notifyIcon.ShowBalloonTip(5000, $"{label} 注册失败", ex.Message, ToolTipIcon.Warning);
         }
+    }
+
+    private void ShowOcrNotification(string message)
+    {
+        _notifyIcon.ShowBalloonTip(3500, "WechatStyleScreenshot", message, ToolTipIcon.Info);
     }
 
     protected override void ExitThreadCore()
@@ -62,6 +78,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         _hotkeyManager.Dispose();
+        _screenshotController.Dispose();
         base.ExitThreadCore();
     }
 }

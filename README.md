@@ -5,12 +5,15 @@
 ## 功能亮点
 
 - Windows：`Alt + A` 唤醒截图
+- Windows：`Alt + Shift + A` 直接框选并提取文字
 - macOS：`Option + A` 唤醒截图
+- macOS：`Option + Shift + A` 直接框选并提取文字
 - 框选区域后进入确认态
 - 选区支持移动和拖拽调整大小
 - 双击左键确认截图
 - 单击右键退出截图
 - 确认后自动复制到剪贴板
+- 支持中英文本地 OCR，结果自动复制到剪贴板
 - 无广告、无复杂设置、无主窗口
 - Windows 支持托盘退出和开机启动
 - macOS 支持菜单栏常驻和登录启动脚本
@@ -20,7 +23,7 @@
 | 平台 | 状态 | 技术 |
 | --- | --- | --- |
 | Windows 10/11 | 可用 | C# / .NET 8 / WinForms |
-| macOS 12+ | 可构建 | Swift / AppKit / Carbon |
+| macOS 12+ | 可构建 | Swift / AppKit / Carbon / Vision |
 
 ## 快速开始
 
@@ -43,6 +46,7 @@ dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Relea
 
 ```text
 Alt + A
+Alt + Shift + A
 ```
 
 ### macOS
@@ -58,6 +62,7 @@ chmod +x build-and-run.command build-macos.sh install-login-item.sh uninstall-lo
 
 ```text
 Option + A
+Option + Shift + A
 ```
 
 macOS 首次截图时可能需要授权：
@@ -83,6 +88,17 @@ macOS 首次截图时可能需要授权：
 7. 双击左键或点击绿色勾确认
 8. 右键、红色叉或 `Esc` 取消
 9. 确认后可直接 `Ctrl + V` 粘贴到微信、PPT、浏览器或文档
+10. 点击工具栏“文”可识别选区文字并复制到剪贴板
+
+## OCR 文字提取
+
+Windows 按 `Alt + Shift + A` 后拖拽选区，松开鼠标即开始识别；也可在普通截图模式中点击工具栏“文”。macOS 按 `Option + Shift + A` 并使用系统框选截图。中英文识别结果会直接复制到系统剪贴板；未识别到文字时不会覆盖已有剪贴板内容。
+
+Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。macOS 使用系统 Vision 框架。两端识别都在本机完成，不调用云端服务。
+
+## 隐私
+
+OCR recognition runs locally on the device. Screenshots are not uploaded. OCR content is not collected. No account or API key is required.
 
 ## 项目结构
 
@@ -137,3 +153,4 @@ macOS：
 
 MIT
 
+OCR dependency notices are documented in [`windows/THIRD-PARTY-NOTICES.md`](windows/THIRD-PARTY-NOTICES.md).

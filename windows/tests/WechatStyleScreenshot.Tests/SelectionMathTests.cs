@@ -119,4 +119,17 @@ public class SelectionMathTests
         Assert.Equal(ToolbarButtonHit.Confirm, SelectionMath.HitTestToolbarButtons(cancel, confirm, new Point(70, 20)));
         Assert.Equal(ToolbarButtonHit.None, SelectionMath.HitTestToolbarButtons(cancel, confirm, new Point(45, 20)));
     }
+
+    [Fact]
+    public void HitTestToolbarButtonsDetectsCancelOcrAndConfirmWithoutOverlap()
+    {
+        Rectangle cancel = new(10, 10, 30, 30);
+        Rectangle ocr = new(50, 10, 30, 30);
+        Rectangle confirm = new(90, 10, 30, 30);
+
+        Assert.Equal(ToolbarButtonHit.Cancel, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(15, 20)));
+        Assert.Equal(ToolbarButtonHit.Ocr, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(55, 20)));
+        Assert.Equal(ToolbarButtonHit.Confirm, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(95, 20)));
+        Assert.Equal(ToolbarButtonHit.None, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(45, 20)));
+    }
 }

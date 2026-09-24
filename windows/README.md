@@ -5,10 +5,13 @@
 ## 功能
 
 - 全局快捷键：`Alt + A`
+- OCR 快捷键：`Alt + Shift + A`
 - 全屏半透明遮罩
 - 鼠标拖拽选择截图区域
 - 选区边框和尺寸提示
 - 松开鼠标后自动复制到剪贴板
+- 本地 Tesseract 5 OCR，支持简体中文和英文
+- OCR 结果自动写入剪贴板；空结果不改动原剪贴板
 - `Esc` 取消截图
 - 无主窗口
 - 系统托盘图标
@@ -40,6 +43,8 @@ WechatStyleScreenshot/
 - Windows 10 或 Windows 11
 - .NET 8 SDK，用于编译
 - .NET 8 Desktop Runtime，用于运行非自包含发布版
+- OCR 发布包包含 Tesseract/Leptonica、`chi_sim`/`eng` 模型和 app-local Visual C++ Runtime；用户无需安装 VC++ Runtime 或下载语言模型
+- 日常使用 OCR 时不需要网络、账号、API Key 或环境变量
 
 安装 .NET 8 SDK 后，在项目根目录运行：
 
@@ -57,10 +62,10 @@ dotnet run --project .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj
 dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Release -r win-x64 --self-contained false -o .\publish
 ```
 
-自包含单文件版，体积更大，目标机器不需要预装运行时：
+自包含发布版（多文件），目标机器不需要预装 .NET 或 VC++ Runtime。OCR 模型和 native DLL 需要与 exe 一起保留：
 
 ```powershell
-dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o .\publish-self-contained
+dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\publish-self-contained
 ```
 
 发布后运行：
@@ -74,6 +79,8 @@ dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Relea
 ```powershell
 .\publish-self-contained\WechatStyleScreenshot.exe
 ```
+
+发布目录是可移动的完整应用包；请保留 `tessdata`、`x64` 和 Runtime DLL 文件，不要只复制 EXE。
 
 ## 开机启动
 
@@ -105,6 +112,7 @@ WechatStyleScreenshot
 3. 鼠标拖拽框选区域。
 4. 松开鼠标。
 5. 在微信、PPT、浏览器或文档中按 `Ctrl + V` 粘贴。
+6. 普通截图中点击工具栏“文”提取并复制文字；`Alt + Shift + A` 会在框选松开后立即执行 OCR。
 
 ## 设计说明
 
@@ -112,6 +120,8 @@ WechatStyleScreenshot
 - `ScreenshotOverlayForm` 覆盖 `SystemInformation.VirtualScreen`，支持多显示器虚拟桌面坐标。
 - `ScreenCaptureEngine` 使用 `Graphics.CopyFromScreen`，避免引入大型依赖。
 - `ClipboardManager` 使用 `Clipboard.SetImage`，保持和常见 Windows 应用粘贴链路兼容。
+- `OcrService` 使用本地 Tesseract 5 `chi_sim+eng`，资源路径相对 `AppContext.BaseDirectory`。
+- 发布包带 app-local Visual C++ Runtime DLL，不执行系统级安装；Windows 10/11 的 UCRT 由系统提供。
 - `StartupManager` 只写当前用户注册表，不需要管理员权限。
 
 ## 注意
@@ -119,3 +129,8 @@ WechatStyleScreenshot
 - 如果 `Alt + A` 被其他软件占用，托盘会弹出注册失败提示。
 - 程序需要在 STA 线程运行，项目入口已配置 `[STAThread]`。
 - DPI 感知通过 `app.manifest` 设置为 PerMonitorV2，减少缩放环境下的坐标偏差。
+- OCR 识别完全在本机运行；截图与识别文字不会上传，也不会收集。
+
+## 第三方许可
+
+TesseractOCR 与语言模型采用 Apache-2.0 许可。应用包中 Visual C++ Runtime DLL 的再分发受 Microsoft Visual Studio 2022 Runtime 条款约束，详见 [第三方声明](THIRD-PARTY-NOTICES.md)。

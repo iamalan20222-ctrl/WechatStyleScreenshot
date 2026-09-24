@@ -6,54 +6,77 @@ namespace WechatStyleScreenshot.Services;
 public sealed class HotkeyManager : NativeWindow, IDisposable
 {
     private const int WmHotkey = 0x0312;
-    private const int HotkeyId = 0x4141;
+    public const int ScreenshotHotkeyId = 0x4141;
+    public const int OcrHotkeyId = 0x4142;
     private const uint ModAlt = 0x0001;
+    private const uint ModShift = 0x0004;
 
-    private bool _registered;
+    private readonly HashSet<int> _registeredIds = [];
     private bool _disposed;
 
-    public event EventHandler? HotkeyPressed;
+    public event EventHandler<HotkeyPressedEventArgs>? HotkeyPressed;
 
     public HotkeyManager()
     {
         CreateHandle(new CreateParams());
     }
 
+    public void RegisterScreenshotHotkey()
+    {
+        Register(ScreenshotHotkeyId, ModAlt, Keys.A);
+    }
+
+    public void RegisterOcrHotkey()
+    {
+        Register(OcrHotkeyId, ModAlt | ModShift, Keys.A);
+    }
+
     public void RegisterAltA()
     {
-        if (_registered)
+        RegisterScreenshotHotkey();
+    }
+
+    private void Register(int id, uint modifiers, Keys key)
+    {
+        if (_registeredIds.Contains(id))
         {
             return;
         }
 
-        if (!RegisterHotKey(Handle, HotkeyId, ModAlt, (uint)Keys.A))
+        if (!RegisterHotKey(Handle, id, modifiers, (uint)key))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Alt+A is already in use or cannot be registered.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Hotkey {GetActionForId(id)} is already in use or cannot be registered.");
         }
 
-        _registered = true;
+        _registeredIds.Add(id);
     }
 
     public void Unregister()
     {
-        if (!_registered)
-        {
-            return;
-        }
-
-        UnregisterHotKey(Handle, HotkeyId);
-        _registered = false;
+        foreach (int id in _registeredIds)
+            UnregisterHotKey(Handle, id);
+        _registeredIds.Clear();
     }
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == WmHotkey && m.WParam.ToInt32() == HotkeyId)
+        if (m.Msg == WmHotkey && GetActionForId(m.WParam.ToInt32()) is HotkeyAction action)
         {
-            HotkeyPressed?.Invoke(this, EventArgs.Empty);
+            HotkeyPressed?.Invoke(this, new HotkeyPressedEventArgs(action));
             return;
         }
 
         base.WndProc(ref m);
+    }
+
+    public static HotkeyAction? GetActionForId(int id)
+    {
+        return id switch
+        {
+            ScreenshotHotkeyId => HotkeyAction.Screenshot,
+            OcrHotkeyId => HotkeyAction.Ocr,
+            _ => null
+        };
     }
 
     public void Dispose()
@@ -73,4 +96,20 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+}
+
+public enum HotkeyAction
+{
+    Screenshot,
+    Ocr
+}
+
+public sealed class HotkeyPressedEventArgs : EventArgs
+{
+    public HotkeyAction Action { get; }
+
+    public HotkeyPressedEventArgs(HotkeyAction action)
+    {
+        Action = action;
+    }
 }

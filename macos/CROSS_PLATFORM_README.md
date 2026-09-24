@@ -32,6 +32,9 @@ chmod +x build-and-run.command build-macos.sh install-login-item.sh uninstall-lo
 
 ```text
 Option + A
+Option + Shift + A
 ```
 
 macOS 首次使用需要在系统设置中允许屏幕录制权限。
+
+Option + Shift + A 使用系统 Vision 在本机识别截图文字，并复制识别结果到剪贴板。
