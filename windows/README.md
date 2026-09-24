@@ -85,6 +85,16 @@ dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Relea
 
 发布目录是可移动的完整应用包；请保留 `tessdata`、`x64` 和 Runtime DLL 文件，不要只复制 EXE。
 
+## Outfit API Smoke Test
+
+对你有权提交的图片，可在当前 PowerShell 进程设置 `ARK_API_KEY` 后运行：
+
+```powershell
+.\publish-self-contained\WechatStyleScreenshot.exe --outfit-smoke-test "C:\path\to\adult-model-test.jpeg"
+```
+
+Smoke test 通过正式 `AiOutfitPreviewService` 顺序发送三次请求，复用服务和 `HttpClient`，每次都使用同一份原图。结果 PNG 与脱敏诊断报告写到图片旁的 `results` 目录，不会写入仓库；报告不包含密钥、prompt 或图像载荷。
+
 ## 开机启动
 
 程序使用当前用户注册表启动项：

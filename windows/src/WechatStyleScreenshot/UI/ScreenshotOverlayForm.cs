@@ -40,11 +40,13 @@ public sealed class ScreenshotOverlayForm : Form
     private bool _outfitCancellationRequested;
     private long _outfitStartedAt;
     private DateTime _outfitErrorExpiresAt;
+    private DateTime _outfitNoticeExpiresAt;
+    private string? _outfitNotice;
     private int _loadingFrame;
 
     public event EventHandler<Rectangle>? SelectionCompleted;
     public event EventHandler<Rectangle>? TextExtractionRequested;
-    public event EventHandler? OutfitPreviewRequested;
+    public event Func<ScreenshotOverlayForm, bool>? OutfitPreviewStartRequested;
     public event EventHandler? OutfitPreviewCancellationRequested;
     public event EventHandler? CaptureCancelled;
 
@@ -272,13 +274,22 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void RequestOutfitPreview()
     {
-        if (!_hasSelection || !SelectionMath.IsCapturable(_selection) || _outfitSession is null || !_outfitSession.TryBegin()) return;
+        if (!_hasSelection || !SelectionMath.IsCapturable(_selection) || _outfitSession is null) return;
+        if (OutfitPreviewStartRequested?.Invoke(this) == true) return;
+        ShowOutfitNotice("AI 服务准备中…", TimeSpan.FromSeconds(1));
+    }
+
+    public bool TryBeginOutfitPreview()
+    {
+        if (IsDisposed || Disposing || !_hasSelection || !SelectionMath.IsCapturable(_selection) ||
+            _outfitSession is null || !_outfitSession.TryBegin()) return false;
         _outfitCancellationRequested = false;
+        _outfitNotice = null;
         _outfitStartedAt = Stopwatch.GetTimestamp();
         _loadingFrame = 0;
         _outfitTimer.Start();
         Invalidate(_selection);
-        OutfitPreviewRequested?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
@@ -341,7 +352,7 @@ public sealed class ScreenshotOverlayForm : Form
             DrawSizeLabel(e.Graphics, selection);
         }
 
-        if (_outfitSession is { State: not OutfitPreviewState.None and not OutfitPreviewState.Success })
+        if (_outfitSession is { State: not OutfitPreviewState.None and not OutfitPreviewState.Success } || _outfitNotice is not null)
         {
             DrawOutfitStatus(e.Graphics, selection);
         }
@@ -437,6 +448,7 @@ public sealed class ScreenshotOverlayForm : Form
 
         _outfitSession.Complete(resultImage);
         _outfitCancellationRequested = false;
+        _outfitNotice = null;
         _outfitTimer.Stop();
         Invalidate(_selection);
     }
@@ -446,9 +458,28 @@ public sealed class ScreenshotOverlayForm : Form
         if (IsDisposed || Disposing || _outfitSession is null) return;
         _outfitSession.Fail(message);
         _outfitCancellationRequested = false;
+        _outfitNotice = null;
         _outfitErrorExpiresAt = DateTime.UtcNow.AddSeconds(3);
         _outfitTimer.Start();
         Invalidate(_selection);
+    }
+
+    public void ShowOutfitNotice(string message, TimeSpan duration)
+    {
+        if (IsDisposed || Disposing) return;
+        _outfitNotice = message;
+        _outfitNoticeExpiresAt = DateTime.UtcNow + duration;
+        _outfitTimer.Start();
+        Invalidate(_selection);
+    }
+
+    public void SetOutfitRetryNotice(TimeSpan delay, OutfitPreviewStatus status)
+    {
+        int seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
+        string message = status == OutfitPreviewStatus.RateLimited
+            ? $"AI 请求较快，{seconds} 秒后自动继续…"
+            : $"AI 服务繁忙，{seconds} 秒后自动继续…";
+        ShowOutfitNotice(message, delay);
     }
 
     public void FinishOutfitCancellation()
@@ -456,6 +487,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (IsDisposed || Disposing || _outfitSession is null) return;
         _outfitSession.Cancel();
         _outfitCancellationRequested = false;
+        _outfitNotice = null;
         _outfitTimer.Stop();
         Invalidate(_selection);
     }
@@ -487,6 +519,7 @@ public sealed class ScreenshotOverlayForm : Form
         _outfitSession?.Dispose();
         _outfitSession = null;
         _outfitCancellationRequested = false;
+        _outfitNotice = null;
         if (_hasSelection && SelectionMath.IsCapturable(_selection))
         {
             using Bitmap original = _desktopSnapshot.Clone(_selection, PixelFormat.Format32bppArgb);
@@ -500,6 +533,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (_outfitSession?.IsBusy == true)
         {
             _loadingFrame = (_loadingFrame + 1) % 16;
+            if (_outfitNotice is not null && DateTime.UtcNow >= _outfitNoticeExpiresAt) _outfitNotice = null;
             Invalidate(_selection);
             return;
         }
@@ -510,7 +544,13 @@ public sealed class ScreenshotOverlayForm : Form
             _outfitTimer.Stop();
             Invalidate(_selection);
         }
-        else if (_outfitSession?.State != OutfitPreviewState.Error)
+        else if (_outfitNotice is not null && DateTime.UtcNow >= _outfitNoticeExpiresAt)
+        {
+            _outfitNotice = null;
+            _outfitTimer.Stop();
+            Invalidate(_selection);
+        }
+        else if (_outfitSession?.State != OutfitPreviewState.Error && _outfitNotice is null)
         {
             _outfitTimer.Stop();
         }
@@ -520,14 +560,14 @@ public sealed class ScreenshotOverlayForm : Form
     {
         using SolidBrush shade = new(Color.FromArgb(100, Color.Black));
         graphics.FillRectangle(shade, selection);
-        string message = _outfitSession!.State switch
+        string message = _outfitNotice ?? (_outfitSession?.State switch
         {
             OutfitPreviewState.Preparing => "正在准备图片…",
             OutfitPreviewState.Generating => _outfitCancellationRequested ? "正在取消…" : "AI 正在替换穿搭" + new string('.', _loadingFrame / 4 % 3 + 1),
             OutfitPreviewState.Applying => "正在应用生成结果…",
-            OutfitPreviewState.Error => _outfitSession.ErrorMessage ?? "生成失败，请重试",
+            OutfitPreviewState.Error => _outfitSession?.ErrorMessage ?? "生成失败，请重试",
             _ => string.Empty
-        };
+        } ?? string.Empty);
 
         using Font font = new("Microsoft YaHei UI", 12f, FontStyle.Bold, GraphicsUnit.Point);
         using SolidBrush text = new(Color.White);
@@ -535,7 +575,7 @@ public sealed class ScreenshotOverlayForm : Form
         Rectangle messageBounds = new(selection.Left + 6, selection.Top + selection.Height / 2 - 14, Math.Max(1, selection.Width - 12), 30);
         graphics.DrawString(message, font, text, messageBounds, centered);
 
-        if (_outfitSession.IsBusy)
+        if (_outfitSession?.IsBusy == true)
         {
             int centerX = selection.Left + selection.Width / 2;
             int centerY = selection.Top + selection.Height / 2;

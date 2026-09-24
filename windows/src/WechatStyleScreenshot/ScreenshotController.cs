@@ -13,7 +13,7 @@ public sealed class ScreenshotController
     private readonly AiOutfitPreviewService _outfitPreviewService;
     private readonly Action<string> _notify;
     private ScreenshotOverlayForm? _overlay;
-    private CancellationTokenSource? _outfitRequestCancellation;
+    private readonly OutfitPreviewRequestGate _outfitRequestGate = new();
     private bool _isCapturing;
     private bool _disposed;
 
@@ -46,7 +46,7 @@ public sealed class ScreenshotController
         _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
-        _overlay.OutfitPreviewRequested += OnOutfitPreviewRequested;
+        _overlay.OutfitPreviewStartRequested += TryStartOutfitPreview;
         _overlay.OutfitPreviewCancellationRequested += OnOutfitCancellationRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
         _overlay.FormClosed += OnOverlayClosed;
@@ -120,19 +120,30 @@ public sealed class ScreenshotController
 
     private void OnCaptureCancelled(object? sender, EventArgs e)
     {
-        _outfitRequestCancellation?.Cancel();
+        _outfitRequestGate.CancelActive();
         ResetOverlay();
     }
 
-    private async void OnOutfitPreviewRequested(object? sender, EventArgs e)
+    private bool TryStartOutfitPreview(ScreenshotOverlayForm overlay)
     {
-        if (_disposed || sender is not ScreenshotOverlayForm overlay || overlay.IsDisposed || _outfitRequestCancellation is not null)
+        if (_disposed || overlay.IsDisposed || overlay.Disposing || !ReferenceEquals(_overlay, overlay))
         {
-            return;
+            return false;
         }
 
-        CancellationTokenSource cancellation = new();
-        _outfitRequestCancellation = cancellation;
+        if (!_outfitRequestGate.TryAcquire(out CancellationTokenSource cancellation)) return false;
+        if (!overlay.TryBeginOutfitPreview())
+        {
+            _outfitRequestGate.Release(cancellation);
+            return false;
+        }
+
+        _ = RunOutfitPreviewAsync(overlay, cancellation);
+        return true;
+    }
+
+    private async Task RunOutfitPreviewAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation)
+    {
         Bitmap? resultImageToDispose = null;
         try
         {
@@ -148,7 +159,8 @@ public sealed class ScreenshotController
             OutfitPreviewResult result = await _outfitPreviewService.GenerateAsync(
                 originalSelection,
                 new OutfitPreviewOptions(),
-                cancellation.Token);
+                cancellation.Token,
+                (delay, status) => ShowRetryNotice(overlay, delay, status));
 
             if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
             {
@@ -190,14 +202,27 @@ public sealed class ScreenshotController
         finally
         {
             resultImageToDispose?.Dispose();
-            if (ReferenceEquals(_outfitRequestCancellation, cancellation)) _outfitRequestCancellation = null;
-            cancellation.Dispose();
+            _outfitRequestGate.Release(cancellation);
+        }
+    }
+
+    private static void ShowRetryNotice(ScreenshotOverlayForm overlay, TimeSpan delay, OutfitPreviewStatus status)
+    {
+        if (overlay.IsDisposed || overlay.Disposing || !overlay.IsHandleCreated) return;
+        if (overlay.InvokeRequired)
+        {
+            try { overlay.BeginInvoke(new Action(() => overlay.SetOutfitRetryNotice(delay, status))); }
+            catch (InvalidOperationException) { }
+        }
+        else
+        {
+            overlay.SetOutfitRetryNotice(delay, status);
         }
     }
 
     private void OnOutfitCancellationRequested(object? sender, EventArgs e)
     {
-        _outfitRequestCancellation?.Cancel();
+        _outfitRequestGate.CancelActive();
     }
 
     private static string BuildOutfitErrorMessage(OutfitPreviewResult result)
@@ -233,7 +258,7 @@ public sealed class ScreenshotController
 
     private void OnOverlayClosed(object? sender, FormClosedEventArgs e)
     {
-        _outfitRequestCancellation?.Cancel();
+        _outfitRequestGate.CancelActive();
         _isCapturing = false;
         _overlay = null;
     }
@@ -247,11 +272,11 @@ public sealed class ScreenshotController
             return;
         }
 
-        _outfitRequestCancellation?.Cancel();
+        _outfitRequestGate.CancelActive();
 
         overlay.SelectionCompleted -= OnSelectionCompleted;
         overlay.TextExtractionRequested -= OnTextExtractionRequested;
-        overlay.OutfitPreviewRequested -= OnOutfitPreviewRequested;
+        overlay.OutfitPreviewStartRequested -= TryStartOutfitPreview;
         overlay.OutfitPreviewCancellationRequested -= OnOutfitCancellationRequested;
         overlay.CaptureCancelled -= OnCaptureCancelled;
         overlay.FormClosed -= OnOverlayClosed;

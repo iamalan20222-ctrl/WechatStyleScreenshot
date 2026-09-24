@@ -30,7 +30,16 @@ public sealed record OutfitPreviewResult(
     string? ProviderCode = null,
     string? RequestId = null,
     int? RetryAfterSeconds = null,
-    string? SafeMessage = null);
+    string? SafeMessage = null,
+    int RetryCount = 0,
+    IReadOnlyList<OutfitPreviewAttempt>? Attempts = null);
+
+public sealed record OutfitPreviewAttempt(
+    int? HttpStatusCode,
+    string? ProviderCode,
+    string? RequestId,
+    int? RetryAfterSeconds,
+    string? SafeMessage);
 
 public sealed class AiOutfitPreviewService : IDisposable
 {
@@ -40,61 +49,86 @@ public sealed class AiOutfitPreviewService : IDisposable
     private readonly bool _ownsClient;
     private readonly string? _apiKey;
     private readonly string _model;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
-    public AiOutfitPreviewService(HttpClient? httpClient = null, string? apiKey = null, string? model = null)
+    public AiOutfitPreviewService(HttpClient? httpClient = null, string? apiKey = null, string? model = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _ownsClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("ARK_API_KEY");
         _model = model ?? Environment.GetEnvironmentVariable("ARK_MODEL") ?? "doubao-seedream-5-0-pro-260628";
+        _delayAsync = delayAsync ?? ((delay, token) => Task.Delay(delay, token));
     }
 
-    public async Task<OutfitPreviewResult> GenerateAsync(Bitmap source, OutfitPreviewOptions options, CancellationToken cancellationToken = default)
+    public async Task<OutfitPreviewResult> GenerateAsync(Bitmap source, OutfitPreviewOptions options,
+        CancellationToken cancellationToken = default, Action<TimeSpan, OutfitPreviewStatus>? retryScheduled = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (string.IsNullOrWhiteSpace(_apiKey)) return new(OutfitPreviewStatus.ApiKeyMissing);
 
+        List<OutfitPreviewAttempt> attempts = [];
+        int attemptNumber = 0;
         try
         {
             string? imageDataUri = await Task.Run(() => CreateImageDataUri(source), cancellationToken).ConfigureAwait(false);
             if (imageDataUri is null) return new(OutfitPreviewStatus.Failed);
 
-            using HttpRequestMessage request = new(HttpMethod.Post, Endpoint);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-            request.Content = JsonContent.Create(new
+            string prompt = OutfitPromptBuilder.Build(options);
+            for (attemptNumber = 1; attemptNumber <= 3; attemptNumber++)
             {
-                model = _model,
-                prompt = OutfitPromptBuilder.Build(options),
-                image = imageDataUri,
-                size = "1K",
-                output_format = "png",
-                response_format = "b64_json",
-                watermark = true
-            });
+                cancellationToken.ThrowIfCancellationRequested();
+                using HttpRequestMessage request = CreateRequest(imageDataUri, prompt, source.Width, source.Height);
+                using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                OutfitPreviewResult failure = await ReadProviderErrorAsync(response, cancellationToken).ConfigureAwait(false);
-                Debug.WriteLine($"Outfit API failure: status={failure.HttpStatusCode}; code={failure.ProviderCode}; requestId={failure.RequestId}; retryAfterSeconds={failure.RetryAfterSeconds}");
-                return failure;
+                if (!response.IsSuccessStatusCode)
+                {
+                    OutfitPreviewResult failure = await ReadProviderErrorAsync(response, cancellationToken).ConfigureAwait(false);
+                    attempts.Add(ToAttempt(failure));
+                    Debug.WriteLine($"Outfit API failure: status={failure.HttpStatusCode}; code={failure.ProviderCode}; requestId={failure.RequestId}; retryAfterSeconds={failure.RetryAfterSeconds}");
+
+                    if (attemptNumber < 3 && IsRetryable(failure.HttpStatusCode))
+                    {
+                        TimeSpan delay = failure.RetryAfterSeconds is int retryAfter
+                            ? TimeSpan.FromSeconds(retryAfter)
+                            : TimeSpan.FromSeconds(2 << (attemptNumber - 1));
+                        retryScheduled?.Invoke(delay, failure.Status);
+                        await _delayAsync(delay, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    return failure with { RetryCount = attemptNumber - 1, Attempts = attempts.ToArray() };
+                }
+
+                string? requestId = GetResponseRequestId(response);
+                await using Stream responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                using JsonDocument document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                if (!document.RootElement.TryGetProperty("data", out JsonElement data) || data.GetArrayLength() == 0 ||
+                    !data[0].TryGetProperty("b64_json", out JsonElement imageData))
+                {
+                    attempts.Add(new((int)response.StatusCode, null, requestId, null, null));
+                    OutfitPreviewResult empty = new(OutfitPreviewStatus.NoUsableImage, HttpStatusCode: (int)response.StatusCode,
+                        RequestId: requestId, RetryCount: attemptNumber - 1, Attempts: attempts.ToArray());
+                    return empty;
+                }
+
+                byte[] bytes;
+                try { bytes = Convert.FromBase64String(imageData.GetString() ?? string.Empty); }
+                catch (FormatException)
+                {
+                    attempts.Add(new((int)response.StatusCode, null, requestId, null, null));
+                    return new OutfitPreviewResult(OutfitPreviewStatus.NoUsableImage, HttpStatusCode: (int)response.StatusCode,
+                        RequestId: requestId, RetryCount: attemptNumber - 1, Attempts: attempts.ToArray());
+                }
+
+                using MemoryStream resultStream = new(bytes, writable: false);
+                using Image decoded = Image.FromStream(resultStream);
+                attempts.Add(new((int)response.StatusCode, null, requestId, null, null));
+                return new OutfitPreviewResult(OutfitPreviewStatus.Success, new Bitmap(decoded),
+                    HttpStatusCode: (int)response.StatusCode, RequestId: requestId,
+                    RetryCount: attemptNumber - 1, Attempts: attempts.ToArray());
             }
-
-            await using Stream responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-            using JsonDocument document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (!document.RootElement.TryGetProperty("data", out JsonElement data) || data.GetArrayLength() == 0 ||
-                !data[0].TryGetProperty("b64_json", out JsonElement imageData))
-            {
-                return new(OutfitPreviewStatus.NoUsableImage);
-            }
-
-            byte[] bytes;
-            try { bytes = Convert.FromBase64String(imageData.GetString() ?? string.Empty); }
-            catch (FormatException) { return new(OutfitPreviewStatus.NoUsableImage); }
-
-            using MemoryStream resultStream = new(bytes, writable: false);
-            using Image decoded = Image.FromStream(resultStream);
-            return new(OutfitPreviewStatus.Success, new Bitmap(decoded));
+            return new(OutfitPreviewStatus.Failed);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -102,15 +136,18 @@ public sealed class AiOutfitPreviewService : IDisposable
         }
         catch (TaskCanceledException)
         {
-            return new(OutfitPreviewStatus.TimedOut);
+            attempts.Add(new(null, null, null, null, "Request timed out"));
+            return new OutfitPreviewResult(OutfitPreviewStatus.TimedOut, RetryCount: Math.Max(0, attemptNumber - 1), Attempts: attempts.ToArray());
         }
         catch (HttpRequestException)
         {
-            return new(OutfitPreviewStatus.NetworkError);
+            attempts.Add(new(null, null, null, null, "Network error"));
+            return new OutfitPreviewResult(OutfitPreviewStatus.NetworkError, RetryCount: Math.Max(0, attemptNumber - 1), Attempts: attempts.ToArray());
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or OutOfMemoryException or ExternalException)
         {
-            return new(OutfitPreviewStatus.Failed);
+            attempts.Add(new(null, null, null, null, "Invalid or unusable provider response"));
+            return new OutfitPreviewResult(OutfitPreviewStatus.Failed, RetryCount: Math.Max(0, attemptNumber - 1), Attempts: attempts.ToArray());
         }
     }
 
@@ -127,6 +164,46 @@ public sealed class AiOutfitPreviewService : IDisposable
             ? null
             : $"data:image/png;base64,{Convert.ToBase64String(imageStream.ToArray())}";
     }
+
+    private HttpRequestMessage CreateRequest(string imageDataUri, string prompt, int sourceWidth, int sourceHeight)
+    {
+        HttpRequestMessage request = new(HttpMethod.Post, Endpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+        request.Content = JsonContent.Create(new
+        {
+            model = _model,
+            prompt,
+            image = imageDataUri,
+            size = GetOutputSize(sourceWidth, sourceHeight),
+            output_format = "png",
+            response_format = "b64_json",
+            watermark = true
+        });
+        return request;
+    }
+
+    private static string GetOutputSize(int sourceWidth, int sourceHeight)
+    {
+        const double minimumPixels = 921_600;
+        const double maximumPixels = 4_624_220;
+        double sourcePixels = (double)sourceWidth * sourceHeight;
+        if (sourcePixels is >= minimumPixels and <= maximumPixels)
+            return $"{sourceWidth}x{sourceHeight}";
+
+        double targetPixels = sourcePixels < minimumPixels ? 1_000_000 : 4_500_000;
+        double scale = Math.Sqrt(targetPixels / sourcePixels);
+        int width = Math.Max(1, (int)Math.Round(sourceWidth * scale));
+        int height = Math.Max(1, (int)Math.Round(sourceHeight * scale));
+        return $"{width}x{height}";
+    }
+
+    private static bool IsRetryable(int? statusCode) => statusCode == 429 || statusCode is 500 or 502 or 503 or 504;
+
+    private static OutfitPreviewAttempt ToAttempt(OutfitPreviewResult result) =>
+        new(result.HttpStatusCode, result.ProviderCode, result.RequestId, result.RetryAfterSeconds, result.SafeMessage);
+
+    private static string? GetResponseRequestId(HttpResponseMessage response) => SanitizeToken(
+        ReadHeader(response, "x-request-id") ?? ReadHeader(response, "x-tt-logid") ?? ReadHeader(response, "request-id"));
 
     private static async Task<OutfitPreviewResult> ReadProviderErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
