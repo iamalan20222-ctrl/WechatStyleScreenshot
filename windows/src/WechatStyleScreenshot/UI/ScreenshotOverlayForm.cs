@@ -3,6 +3,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Diagnostics;
 using WechatStyleScreenshot.Core;
+using WechatStyleScreenshot.Services;
 
 namespace WechatStyleScreenshot.UI;
 
