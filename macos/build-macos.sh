@@ -16,6 +16,7 @@ swiftc \
   "$ROOT_DIR/src/main.swift" \
   -framework AppKit \
   -framework Carbon \
+  -framework Vision \
   -O \
   -o "$MACOS_DIR/WechatStyleScreenshot"
 
@@ -28,4 +29,3 @@ ditto -c -k --keepParent "$APP_DIR" "$DIST_DIR/WechatStyleScreenshot-macOS.zip"
 
 echo "Built: $APP_DIR"
 echo "Zip:   $DIST_DIR/WechatStyleScreenshot-macOS.zip"
-

@@ -16,4 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Assets\*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

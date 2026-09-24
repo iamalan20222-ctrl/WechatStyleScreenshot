@@ -25,9 +25,27 @@ jobs:
         run: dotnet test .\WechatStyleScreenshot.sln --configuration Release
       - name: Publish
         run: dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o .\publish
+      - name: Verify OCR publish assets
+        shell: pwsh
+        run: |
+          $required = @(
+            ".\publish\WechatStyleScreenshot.exe",
+            ".\publish\tessdata\chi_sim.traineddata",
+            ".\publish\tessdata\eng.traineddata",
+            ".\publish\THIRD-PARTY-NOTICES.md",
+            ".\publish\licenses\Apache-2.0.txt",
+            ".\publish\licenses\Leptonica-BSD-2-Clause.txt",
+            ".\publish\x64\tesseract55.dll",
+            ".\publish\x64\leptonica-1.85.0.dll",
+            ".\publish\vcruntime140.dll",
+            ".\publish\vcruntime140_1.dll",
+            ".\publish\msvcp140.dll"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "Required OCR publish asset missing: $path" }
+          }
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: WechatStyleScreenshot-Windows-win-x64
           path: windows/publish/**
-

@@ -9,16 +9,25 @@ public sealed class ScreenshotController
 {
     private readonly ScreenCaptureEngine _captureEngine;
     private readonly ClipboardManager _clipboardManager;
+    private readonly OcrService _ocrService;
+    private readonly Action<string> _notify;
     private ScreenshotOverlayForm? _overlay;
     private bool _isCapturing;
+    private bool _disposed;
 
-    public ScreenshotController(ScreenCaptureEngine captureEngine, ClipboardManager clipboardManager)
+    public ScreenshotController(
+        ScreenCaptureEngine captureEngine,
+        ClipboardManager clipboardManager,
+        OcrService ocrService,
+        Action<string> notify)
     {
         _captureEngine = captureEngine;
         _clipboardManager = clipboardManager;
+        _ocrService = ocrService;
+        _notify = notify;
     }
 
-    public void BeginCapture()
+    public void BeginCapture(bool extractTextOnSelection = false)
     {
         if (_isCapturing)
         {
@@ -30,12 +39,55 @@ public sealed class ScreenshotController
         Bitmap desktopSnapshot = _captureEngine.Capture(virtualScreenBounds);
 
         _isCapturing = true;
-        _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot);
+        _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
         _overlay.SelectionCompleted += OnSelectionCompleted;
+        _overlay.TextExtractionRequested += OnTextExtractionRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
         _overlay.FormClosed += OnOverlayClosed;
         _overlay.Show();
         _overlay.Activate();
+    }
+
+    private async void OnTextExtractionRequested(object? sender, Rectangle selection)
+    {
+        try
+        {
+            using Bitmap bitmap = _captureEngine.Capture(selection);
+            string text = await _ocrService.RecognizeAsync(bitmap);
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_clipboardManager.TrySetText(text))
+            {
+                _notify("文字已提取并复制");
+            }
+            else
+            {
+                _notify("未识别到文字");
+            }
+        }
+        catch (OcrDependencyException ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+            if (!_disposed)
+            {
+                _notify($"文字提取失败：{ex.Message}");
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(ex);
+            if (!_disposed)
+            {
+                _notify("文字提取失败");
+            }
+        }
+        finally
+        {
+            ResetOverlay();
+        }
     }
 
     private void OnSelectionCompleted(object? sender, Rectangle selection)
@@ -79,6 +131,7 @@ public sealed class ScreenshotController
         }
 
         overlay.SelectionCompleted -= OnSelectionCompleted;
+        overlay.TextExtractionRequested -= OnTextExtractionRequested;
         overlay.CaptureCancelled -= OnCaptureCancelled;
         overlay.FormClosed -= OnOverlayClosed;
         _overlay = null;
@@ -94,5 +147,17 @@ public sealed class ScreenshotController
     private static Rectangle GetVirtualScreenBounds()
     {
         return SystemInformation.VirtualScreen;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        ResetOverlay();
+        _ocrService.Dispose();
     }
 }

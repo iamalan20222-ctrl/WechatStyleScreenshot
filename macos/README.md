@@ -6,10 +6,13 @@
 
 - 菜单栏常驻，无主窗口
 - 全局快捷键：`Option + A`
+- OCR 快捷键：`Option + Shift + A`
 - 框选截图后自动复制到剪贴板
 - 菜单栏可手动触发截图
 - 菜单栏可退出程序
 - 支持安装为登录启动项
+- 使用 Apple Vision 在本机识别中英文截图文字并复制到剪贴板
+- 取消系统框选时不运行 OCR，也不更改剪贴板
 
 ## 为什么 Mac 版和 Windows 版不是同一个 exe
 
@@ -56,7 +59,10 @@ open dist/WechatStyleScreenshot.app
 
 ```text
 Option + A
+Option + Shift + A
 ```
+
+`Option + Shift + A` 会调用 macOS 系统框选，把图片暂存到系统临时目录后交由 Vision 本地识别；处理结束或取消时临时文件会删除。识别结果只复制到本机剪贴板，不会上传或收集。
 
 首次截图时，macOS 可能要求授予屏幕录制权限：
 

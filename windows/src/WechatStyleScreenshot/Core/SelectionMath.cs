@@ -138,16 +138,18 @@ public static class SelectionMath
 
     public static ToolbarButtonHit HitTestToolbarButtons(Rectangle cancelButton, Rectangle confirmButton, Point point)
     {
-        if (cancelButton.Contains(point))
-        {
-            return ToolbarButtonHit.Cancel;
-        }
+        return HitTestToolbarButtons(cancelButton, Rectangle.Empty, confirmButton, point);
+    }
 
-        if (confirmButton.Contains(point))
-        {
-            return ToolbarButtonHit.Confirm;
-        }
-
+    public static ToolbarButtonHit HitTestToolbarButtons(
+        Rectangle cancelButton,
+        Rectangle ocrButton,
+        Rectangle confirmButton,
+        Point point)
+    {
+        if (cancelButton.Contains(point)) return ToolbarButtonHit.Cancel;
+        if (ocrButton.Contains(point)) return ToolbarButtonHit.Ocr;
+        if (confirmButton.Contains(point)) return ToolbarButtonHit.Confirm;
         return ToolbarButtonHit.None;
     }
 }
