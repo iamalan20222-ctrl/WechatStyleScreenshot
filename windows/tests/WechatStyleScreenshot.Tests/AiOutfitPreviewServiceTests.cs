@@ -63,19 +63,52 @@ public class AiOutfitPreviewServiceTests
     }
 
     [Fact]
-    public async Task ProviderErrorsAreSanitized()
+    public async Task RateLimitResponseIncludesSafeProviderDiagnostics()
     {
-        using HttpClient client = new(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        using HttpClient client = new(new StubHandler((_, _) =>
         {
-            Content = new StringContent("private provider diagnostics")
+            HttpResponseMessage response = new(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("{\"error\":{\"code\":\"RequestBurstTooFast\",\"message\":\"Slow down\"},\"request_id\":\"body-id\"}")
+            };
+            response.Headers.TryAddWithoutValidation("x-request-id", "header-id");
+            response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(7));
+            return Task.FromResult(response);
+        }));
+        AiOutfitPreviewService service = new(client, "test-key", "test-model");
+        using Bitmap image = new(2, 2);
+
+        OutfitPreviewResult result = await service.GenerateAsync(image, new OutfitPreviewOptions());
+
+        Assert.Equal(OutfitPreviewStatus.RateLimited, result.Status);
+        Assert.Equal(429, result.HttpStatusCode);
+        Assert.Equal("RequestBurstTooFast", result.ProviderCode);
+        Assert.Equal("body-id", result.RequestId);
+        Assert.Equal(7, result.RetryAfterSeconds);
+        Assert.Equal("Slow down", result.SafeMessage);
+        Assert.Null(result.Image);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden, "ContentPolicyViolation", OutfitPreviewStatus.SafetyRejected)]
+    [InlineData(HttpStatusCode.BadRequest, "InvalidParameter", OutfitPreviewStatus.InvalidRequest)]
+    [InlineData(HttpStatusCode.PaymentRequired, "QuotaExceeded", OutfitPreviewStatus.QuotaExceeded)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "ServerOverloaded", OutfitPreviewStatus.ServerError)]
+    public async Task ProviderErrorCodeAndHttpStatusAreClassified(HttpStatusCode httpStatus, string providerCode, OutfitPreviewStatus expectedStatus)
+    {
+        using HttpClient client = new(new StubHandler((_, _) => Task.FromResult(new HttpResponseMessage(httpStatus)
+        {
+            Content = new StringContent($"{{\"error\":{{\"code\":\"{providerCode}\",\"message\":\"safe diagnostic\"}}}}")
         })));
         AiOutfitPreviewService service = new(client, "test-key", "test-model");
         using Bitmap image = new(2, 2);
 
         OutfitPreviewResult result = await service.GenerateAsync(image, new OutfitPreviewOptions());
 
-        Assert.Equal(OutfitPreviewStatus.Failed, result.Status);
-        Assert.Null(result.Image);
+        Assert.Equal(expectedStatus, result.Status);
+        Assert.Equal((int)httpStatus, result.HttpStatusCode);
+        Assert.Equal(providerCode, result.ProviderCode);
+        Assert.Equal("safe diagnostic", result.SafeMessage);
     }
 
     [Fact]
