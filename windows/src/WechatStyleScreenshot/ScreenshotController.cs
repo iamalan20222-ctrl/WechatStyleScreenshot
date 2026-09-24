@@ -1,4 +1,6 @@
 using System.Drawing;
+using System.Drawing.Imaging;
+using System.Security.Cryptography;
 using WechatStyleScreenshot.Core;
 using WechatStyleScreenshot.Services;
 using WechatStyleScreenshot.UI;
@@ -16,6 +18,12 @@ public sealed class ScreenshotController
     private readonly OutfitPreviewRequestGate _outfitRequestGate = new();
     private bool _isCapturing;
     private bool _disposed;
+    private int _outfitRequestSequence;
+
+    internal event Action<int, string, CancellationTokenSource>? OutfitGateChangedForTesting;
+    internal event Action<int, string>? OutfitInputHashForTesting;
+    internal event Action<int, OutfitPreviewResult>? OutfitResponseForTesting;
+    internal bool OutfitGateBusyForTesting => _outfitRequestGate.IsBusyForTesting;
 
     public ScreenshotController(
         ScreenCaptureEngine captureEngine,
@@ -42,6 +50,20 @@ public sealed class ScreenshotController
         Rectangle virtualScreenBounds = GetVirtualScreenBounds();
         Bitmap desktopSnapshot = _captureEngine.Capture(virtualScreenBounds);
 
+        ScreenshotOverlayForm overlay = CreateOverlay(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
+        overlay.Show();
+        overlay.Activate();
+    }
+
+    internal ScreenshotOverlayForm BeginCaptureForTesting(Bitmap desktopSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(desktopSnapshot);
+        if (_isCapturing) throw new InvalidOperationException("A capture is already active.");
+        return CreateOverlay(new Rectangle(Point.Empty, desktopSnapshot.Size), new Bitmap(desktopSnapshot), false);
+    }
+
+    private ScreenshotOverlayForm CreateOverlay(Rectangle virtualScreenBounds, Bitmap desktopSnapshot, bool extractTextOnSelection)
+    {
         _isCapturing = true;
         _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
         _overlay.SelectionCompleted += OnSelectionCompleted;
@@ -50,8 +72,7 @@ public sealed class ScreenshotController
         _overlay.OutfitPreviewCancellationRequested += OnOutfitCancellationRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
         _overlay.FormClosed += OnOverlayClosed;
-        _overlay.Show();
-        _overlay.Activate();
+        return _overlay;
     }
 
     private async void OnTextExtractionRequested(object? sender, Rectangle selection)
@@ -132,25 +153,43 @@ public sealed class ScreenshotController
         }
 
         if (!_outfitRequestGate.TryAcquire(out CancellationTokenSource cancellation)) return false;
+        int requestNumber = ++_outfitRequestSequence;
+        OutfitGateChangedForTesting?.Invoke(requestNumber, "ACQUIRED", cancellation);
         if (!overlay.TryBeginOutfitPreview())
         {
             _outfitRequestGate.Release(cancellation);
+            OutfitGateChangedForTesting?.Invoke(requestNumber, "RELEASED", cancellation);
             return false;
         }
 
-        _ = RunOutfitPreviewAsync(overlay, cancellation);
+        _ = RunOutfitPreviewAsync(overlay, cancellation, requestNumber);
         return true;
     }
 
-    private async Task RunOutfitPreviewAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation)
+    private async Task RunOutfitPreviewAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation, int requestNumber)
     {
         Bitmap? resultImageToDispose = null;
+        bool requestReleased = false;
+        void ReleaseRequest()
+        {
+            if (requestReleased) return;
+            _outfitRequestGate.Release(cancellation);
+            requestReleased = true;
+            OutfitGateChangedForTesting?.Invoke(requestNumber, "RELEASED", cancellation);
+        }
         try
         {
             using Bitmap originalSelection = overlay.CreateOutfitRequestImage();
+            if (OutfitInputHashForTesting is not null)
+            {
+                using MemoryStream imageStream = new();
+                originalSelection.Save(imageStream, ImageFormat.Png);
+                OutfitInputHashForTesting.Invoke(requestNumber, Convert.ToHexString(SHA256.HashData(imageStream.ToArray())));
+            }
             await Task.Yield();
             if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
             {
+                ReleaseRequest();
                 overlay.FinishOutfitCancellation();
                 return;
             }
@@ -161,10 +200,12 @@ public sealed class ScreenshotController
                 new OutfitPreviewOptions(),
                 cancellation.Token,
                 (delay, status) => ShowRetryNotice(overlay, delay, status));
+            OutfitResponseForTesting?.Invoke(requestNumber, result);
 
             if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
             {
                 result.Image?.Dispose();
+                ReleaseRequest();
                 overlay.FinishOutfitCancellation();
                 return;
             }
@@ -176,16 +217,19 @@ public sealed class ScreenshotController
                 await Task.Yield();
                 if (_disposed || overlay.IsDisposed || overlay.Disposing || cancellation.IsCancellationRequested)
                 {
+                    ReleaseRequest();
                     overlay.FinishOutfitCancellation();
                     return;
                 }
 
+                ReleaseRequest();
                 overlay.CompleteOutfitPreview(resultImageToDispose);
                 resultImageToDispose = null;
                 return;
             }
 
             string message = BuildOutfitErrorMessage(result);
+            ReleaseRequest();
             overlay.ShowOutfitError(message);
             if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify("未配置 ARK_API_KEY");
             else if (result.HttpStatusCode is not null)
@@ -193,16 +237,18 @@ public sealed class ScreenshotController
         }
         catch (OperationCanceledException)
         {
+            ReleaseRequest();
             if (!overlay.IsDisposed && !overlay.Disposing) overlay.FinishOutfitCancellation();
         }
         catch (Exception)
         {
+            ReleaseRequest();
             if (!overlay.IsDisposed && !overlay.Disposing) overlay.ShowOutfitError("生成失败，请重试");
         }
         finally
         {
             resultImageToDispose?.Dispose();
-            _outfitRequestGate.Release(cancellation);
+            ReleaseRequest();
         }
     }
 

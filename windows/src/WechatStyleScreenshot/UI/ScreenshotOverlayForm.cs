@@ -50,6 +50,31 @@ public sealed class ScreenshotOverlayForm : Form
     public event Func<ScreenshotOverlayForm, bool>? OutfitPreviewStartRequested;
     public event EventHandler? OutfitPreviewCancellationRequested;
     public event EventHandler? CaptureCancelled;
+    internal event Action<OutfitPreviewState>? OutfitStateChangedForTesting;
+
+    internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
+    internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
+    internal Bitmap CreateOutfitOriginalImageForTesting() =>
+        _outfitSession?.CreateRequestImage() ?? throw new InvalidOperationException("No selection is active.");
+
+    internal void SetSelectionForTesting(Rectangle selection)
+    {
+        if (!ClientRectangle.Contains(selection) || !SelectionMath.IsCapturable(selection))
+            throw new ArgumentOutOfRangeException(nameof(selection));
+        _selection = selection;
+        _hasSelection = true;
+        ResetOutfitForSelection();
+        UpdateToolbarBounds();
+        Invalidate();
+    }
+
+    internal bool ClickOutfitButtonForTesting()
+    {
+        Point center = new(_outfitButtonBounds.Left + _outfitButtonBounds.Width / 2,
+            _outfitButtonBounds.Top + _outfitButtonBounds.Height / 2);
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+        return OutfitStateForTesting == OutfitPreviewState.Preparing;
+    }
 
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false)
     {
@@ -290,6 +315,7 @@ public sealed class ScreenshotOverlayForm : Form
         _loadingFrame = 0;
         _outfitTimer.Start();
         Invalidate(_selection);
+        OutfitStateChangedForTesting?.Invoke(OutfitPreviewState.Preparing);
         return true;
     }
 
@@ -430,6 +456,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (IsDisposed || Disposing || _outfitSession is null) return;
         _outfitSession.MarkGenerating();
         Invalidate(_selection);
+        OutfitStateChangedForTesting?.Invoke(OutfitPreviewState.Generating);
     }
 
     public void MarkOutfitApplying()
@@ -437,6 +464,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (IsDisposed || Disposing || _outfitSession is null) return;
         _outfitSession.MarkApplying();
         Invalidate(_selection);
+        OutfitStateChangedForTesting?.Invoke(OutfitPreviewState.Applying);
     }
 
     public void CompleteOutfitPreview(Bitmap resultImage)
@@ -452,6 +480,7 @@ public sealed class ScreenshotOverlayForm : Form
         _outfitNotice = null;
         _outfitTimer.Stop();
         Invalidate(_selection);
+        OutfitStateChangedForTesting?.Invoke(OutfitPreviewState.Success);
     }
 
     public void ShowOutfitError(string message)
@@ -463,6 +492,7 @@ public sealed class ScreenshotOverlayForm : Form
         _outfitErrorExpiresAt = DateTime.UtcNow.AddSeconds(3);
         _outfitTimer.Start();
         Invalidate(_selection);
+        OutfitStateChangedForTesting?.Invoke(OutfitPreviewState.Error);
     }
 
     public void ShowOutfitNotice(string message, TimeSpan duration)

@@ -5,6 +5,11 @@ public sealed class OutfitPreviewRequestGate
     private readonly object _sync = new();
     private CancellationTokenSource? _activeRequest;
 
+    internal bool IsBusyForTesting
+    {
+        get { lock (_sync) return _activeRequest is not null; }
+    }
+
     public bool TryAcquire(out CancellationTokenSource request)
     {
         lock (_sync)

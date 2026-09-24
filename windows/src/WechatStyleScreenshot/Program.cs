@@ -16,6 +16,11 @@ internal static class Program
             return await OutfitSmokeTest.RunAsync(args[1]);
         }
 
+        if (args.Length == 2 && args[0].Equals("--outfit-ui-smoke-test", StringComparison.OrdinalIgnoreCase))
+        {
+            return OutfitUiSmokeTest.Run(args[1]);
+        }
+
         StartupManager startupManager = StartupManager.CreateDefault();
         if (args.Contains("--enable-startup", StringComparer.OrdinalIgnoreCase))
         {
