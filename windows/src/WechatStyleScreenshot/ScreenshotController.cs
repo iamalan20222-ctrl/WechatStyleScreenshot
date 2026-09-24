@@ -227,6 +227,7 @@ public sealed class ScreenshotController
         if (!string.IsNullOrWhiteSpace(result.ProviderCode)) parts.Add(result.ProviderCode);
         if (result.RetryAfterSeconds is int retryAfter) parts.Add($"{retryAfter}s 后重试");
         if (!string.IsNullOrWhiteSpace(result.RequestId)) parts.Add($"请求 ID {result.RequestId}");
+        if (!string.IsNullOrWhiteSpace(result.SafeMessage)) parts.Add(result.SafeMessage);
         return string.Join(" · ", parts);
     }
 

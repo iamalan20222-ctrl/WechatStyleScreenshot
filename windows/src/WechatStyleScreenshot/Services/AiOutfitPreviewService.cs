@@ -214,7 +214,8 @@ public sealed class AiOutfitPreviewService : IDisposable
     {
         if (string.IsNullOrWhiteSpace(message)) return null;
         string sanitized = string.Concat(message.Where(c => !char.IsControl(c))).Trim();
-        if (sanitized.Contains("data:image", StringComparison.OrdinalIgnoreCase)) return null;
+        if (sanitized.Contains("data:image", StringComparison.OrdinalIgnoreCase) ||
+            sanitized.Contains("base64", StringComparison.OrdinalIgnoreCase)) return null;
         return sanitized.Length <= 240 ? sanitized : sanitized[..240];
     }
 
