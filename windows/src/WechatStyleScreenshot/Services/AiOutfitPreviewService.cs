@@ -159,14 +159,14 @@ public sealed class AiOutfitPreviewService : IDisposable
         }
 
         int statusCode = (int)response.StatusCode;
-        string? requestId = bodyRequestId
+        string? requestId = SanitizeToken(bodyRequestId
             ?? ReadHeader(response, "x-request-id")
             ?? ReadHeader(response, "x-tt-logid")
-            ?? ReadHeader(response, "request-id");
+            ?? ReadHeader(response, "request-id"));
         int? retryAfter = GetRetryAfterSeconds(response);
         OutfitPreviewStatus status = ClassifyError(statusCode, providerCode, safeMessage);
 
-        return new OutfitPreviewResult(status, HttpStatusCode: statusCode, ProviderCode: providerCode,
+        return new OutfitPreviewResult(status, HttpStatusCode: statusCode, ProviderCode: SanitizeToken(providerCode),
             RequestId: requestId, RetryAfterSeconds: retryAfter, SafeMessage: safeMessage);
     }
 
@@ -216,5 +216,12 @@ public sealed class AiOutfitPreviewService : IDisposable
         string sanitized = string.Concat(message.Where(c => !char.IsControl(c))).Trim();
         if (sanitized.Contains("data:image", StringComparison.OrdinalIgnoreCase)) return null;
         return sanitized.Length <= 240 ? sanitized : sanitized[..240];
+    }
+
+    private static string? SanitizeToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string sanitized = string.Concat(value.Where(c => !char.IsControl(c))).Trim();
+        return sanitized.Length <= 120 ? sanitized : sanitized[..120];
     }
 }
