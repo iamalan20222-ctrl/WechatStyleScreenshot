@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using WechatStyleScreenshot.Services;
@@ -51,46 +52,66 @@ public class OutfitSettingsTests
     }
 
     [Fact]
-    public void VolcanoModelDefaultMigratesButCustomAndOtherProviderSettingsRemain()
+    public void VolcanoModelDefaultsToFlashAndPreservesProAndOtherProviderSettings()
     {
         string path = TempFile("settings.json");
         OutfitSettingsStore store = new(path);
-        OutfitAppSettings oldDefault = new()
+        Assert.Equal(AiOutfitPreviewService.DefaultModel, store.Load().VolcanoModel);
+        OutfitAppSettings settings = new()
         {
-            VolcanoModel = "doubao-seedream-5-0-pro-260628",
+            VolcanoModel = AiOutfitPreviewService.ProModel,
             QwenModel = "qwen-image-3.0",
             OpenAiModel = "gpt-image-2"
         };
-        store.Save(oldDefault);
-        Assert.Equal("doubao-seedream-5-0-flash-260915", store.Load().VolcanoModel);
+        store.Save(settings);
+        Assert.Equal(AiOutfitPreviewService.ProModel, store.Load().VolcanoModel);
         Assert.Equal("qwen-image-3.0", store.Load().QwenModel);
         Assert.Equal("gpt-image-2", store.Load().OpenAiModel);
 
-        oldDefault.VolcanoModel = "my-custom-volcano-model";
-        store.Save(oldDefault);
-        Assert.Equal("my-custom-volcano-model", store.Load().VolcanoModel);
+        settings.VolcanoModel = "unsupported-model";
+        store.Save(settings);
+        Assert.Equal(AiOutfitPreviewService.DefaultModel, store.Load().VolcanoModel);
     }
 
     [Fact]
-    public void ApiSettingsShowsNewVolcanoModelDefaultAndPreservesSavedOverride()
+    public void ApiSettingsOffersTwoVolcanoModelsAndRestoresSavedSelection()
     {
         string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
         OutfitSettingsStore store = new(Path.Combine(directory, "settings.json"));
         CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
-        store.Save(new OutfitAppSettings());
-        Assert.Equal("doubao-seedream-5-0-flash-260915", ReadVolcanoModel(store, credentials));
-        OutfitAppSettings custom = store.Load();
-        custom.VolcanoModel = "my-custom-volcano-model";
-        store.Save(custom);
-        Assert.Equal("my-custom-volcano-model", ReadVolcanoModel(store, credentials));
+        RunOnSta(() =>
+        {
+            using (ApiSettingsForm form = new(store, credentials))
+            {
+                ComboBox model = VolcanoModelCombo(form);
+                Assert.Equal(ComboBoxStyle.DropDownList, model.DropDownStyle);
+                Assert.Equal(2, model.Items.Count);
+                Assert.Equal(new[] { AiOutfitPreviewService.ProModel, AiOutfitPreviewService.DefaultModel },
+                    model.Items.Cast<string>().ToArray());
+                Assert.Equal(AiOutfitPreviewService.DefaultModel, model.SelectedItem);
+                model.SelectedItem = AiOutfitPreviewService.ProModel;
+                Assert.True(form.SaveSettings());
+            }
+            using (ApiSettingsForm reopened = new(store, credentials))
+            {
+                ComboBox model = VolcanoModelCombo(reopened);
+                Assert.Equal(AiOutfitPreviewService.ProModel, model.SelectedItem);
+                model.SelectedItem = AiOutfitPreviewService.DefaultModel;
+                Assert.True(reopened.SaveSettings());
+            }
+            using ApiSettingsForm flash = new(store, credentials);
+            Assert.Equal(AiOutfitPreviewService.DefaultModel, VolcanoModelCombo(flash).SelectedItem);
+        });
     }
 
-    [Fact]
-    public async Task VolcanoProviderUsesFlashDefaultAndKeepsInlineImagePayload()
+    [Theory]
+    [InlineData(AiOutfitPreviewService.ProModel)]
+    [InlineData(AiOutfitPreviewService.DefaultModel)]
+    public async Task VolcanoProviderUsesSelectedModelAndKeepsInlineImagePayload(string model)
     {
         string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
         OutfitSettingsStore settings = new(Path.Combine(directory, "settings.json"));
-        settings.Save(new OutfitAppSettings());
+        settings.Save(new OutfitAppSettings { VolcanoModel = model });
         CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
         credentials.SaveCredential(ImageEditProviderKind.Volcano, "test-volcano-key");
         bool called = false;
@@ -99,7 +120,7 @@ public class OutfitSettingsTests
             called = true;
             Assert.Equal("https://ark.cn-beijing.volces.com/api/v3/images/generations", request.RequestUri!.ToString());
             using JsonDocument body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
-            Assert.Equal("doubao-seedream-5-0-flash-260915", body.RootElement.GetProperty("model").GetString());
+            Assert.Equal(model, body.RootElement.GetProperty("model").GetString());
             Assert.StartsWith("data:image/png;base64,", body.RootElement.GetProperty("image").GetString());
             return SuccessImage();
         }));
@@ -111,25 +132,21 @@ public class OutfitSettingsTests
         Assert.Equal(OutfitPreviewStatus.Success, result.Status);
     }
 
-    private static string ReadVolcanoModel(OutfitSettingsStore store, CredentialStore credentials)
+    private static ComboBox VolcanoModelCombo(ApiSettingsForm form) =>
+        Descendants(form).OfType<ComboBox>().Single(box => box.Items.Contains(AiOutfitPreviewService.ProModel));
+
+    private static void RunOnSta(Action action)
     {
         Exception? failure = null;
-        string? value = null;
         Thread thread = new(() =>
         {
-            try
-            {
-                using ApiSettingsForm form = new(store, credentials);
-                ComboBox model = Descendants(form).OfType<ComboBox>().Single(box => box.Text.Contains("doubao", StringComparison.OrdinalIgnoreCase) || box.Text.StartsWith("my-custom", StringComparison.Ordinal));
-                value = model.Text;
-            }
+            try { action(); }
             catch (Exception ex) { failure = ex; }
         });
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
         thread.Join();
         Assert.Null(failure);
-        return value!;
     }
 
     [Fact]
@@ -287,6 +304,74 @@ public class OutfitSettingsTests
         thread.Start();
         thread.Join();
         Assert.Null(failure);
+    }
+
+    [Theory]
+    [InlineData(ImageEditProviderKind.Volcano)]
+    [InlineData(ImageEditProviderKind.Qwen)]
+    [InlineData(ImageEditProviderKind.OpenAI)]
+    public void ApiSettingsMasksFullNewKeyAndPreservesSavedKeyWhenOnlyModelChanges(ImageEditProviderKind provider)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
+        OutfitSettingsStore settings = new(Path.Combine(directory, "settings.json"));
+        settings.Save(new OutfitAppSettings { QwenWorkspaceId = "workspace123" });
+        CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
+        const string testKey = "ark-test-1234567890";
+
+        RunOnSta(() =>
+        {
+            using (ApiSettingsForm form = new(settings, credentials))
+            {
+                form.Show();
+                form.SelectProviderForTesting(provider);
+                TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+                input.Text = testKey;
+                Assert.Equal(19, input.TextLength);
+                Assert.Equal(testKey, input.Text);
+                Assert.True(input.UseSystemPasswordChar);
+                Button reveal = Descendants(form).OfType<Button>().Single(button => button.Text == "显示");
+                reveal.PerformClick();
+                Assert.False(input.UseSystemPasswordChar);
+                Assert.Equal("隐藏", reveal.Text);
+                Assert.Equal(testKey, input.Text);
+                reveal.PerformClick();
+                Assert.True(input.UseSystemPasswordChar);
+                Assert.Equal("显示", reveal.Text);
+                Assert.True(form.SaveSettings());
+                Assert.Equal(string.Empty, input.Text);
+                Assert.Equal("✓ 已保存", Descendants(form).OfType<Label>().Single(label => label.Text == "✓ 已保存").Text);
+                Assert.True(credentials.HasCredential(provider));
+            }
+
+            using ApiSettingsForm reopened = new(settings, credentials);
+            reopened.SelectProviderForTesting(provider);
+            TextBox blank = Descendants(reopened).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+            Assert.Equal(string.Empty, blank.Text);
+            Assert.Contains("已配置", Descendants(reopened).OfType<Label>()
+                .Single(label => label.Text.Contains("火山方舟：", StringComparison.Ordinal)).Text);
+            if (provider == ImageEditProviderKind.Volcano)
+                VolcanoModelCombo(reopened).SelectedItem = AiOutfitPreviewService.ProModel;
+            Assert.True(reopened.SaveSettings());
+            Assert.Equal(testKey, credentials.GetCredential(provider));
+            reopened.DeleteSavedKey();
+            Assert.False(credentials.HasCredential(provider));
+        });
+    }
+
+    [Theory]
+    [InlineData("●")]
+    [InlineData("•")]
+    [InlineData("****")]
+    public void PlaceholderCannotBeStoredOrUsedAsCredential(string placeholder)
+    {
+        string path = TempFile("secrets.dat");
+        CredentialStore store = new(path);
+        Assert.Throws<ArgumentException>(() => store.SaveCredential(ImageEditProviderKind.Volcano, placeholder));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        byte[] legacy = JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, string> { ["Volcano"] = placeholder });
+        File.WriteAllBytes(path, ProtectedData.Protect(legacy, null, DataProtectionScope.CurrentUser));
+        Assert.Null(store.GetCredential(ImageEditProviderKind.Volcano));
+        Assert.False(store.HasCredential(ImageEditProviderKind.Volcano));
     }
 
     private static IEnumerable<Control> Descendants(Control control)

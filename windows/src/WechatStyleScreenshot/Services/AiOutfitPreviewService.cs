@@ -44,6 +44,7 @@ public sealed record OutfitPreviewAttempt(
 
 public sealed class AiOutfitPreviewService : IImageEditProvider, IOutfitGenerationService
 {
+    public const string ProModel = "doubao-seedream-5-0-pro-260628";
     public const string DefaultModel = "doubao-seedream-5-0-flash-260915";
     private const int MaxErrorBodyBytes = 8 * 1024;
     private const string Endpoint = "https://ark.cn-beijing.volces.com/api/v3/images/generations";

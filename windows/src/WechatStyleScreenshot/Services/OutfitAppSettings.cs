@@ -79,8 +79,8 @@ public sealed class OutfitSettingsStore
         {
             if (!File.Exists(FilePath)) return new OutfitAppSettings();
             OutfitAppSettings settings = JsonSerializer.Deserialize<OutfitAppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new OutfitAppSettings();
-            if (string.IsNullOrWhiteSpace(settings.VolcanoModel) ||
-                settings.VolcanoModel == "doubao-seedream-5-0-pro-260628")
+            if (settings.VolcanoModel != AiOutfitPreviewService.ProModel &&
+                settings.VolcanoModel != AiOutfitPreviewService.DefaultModel)
                 settings.VolcanoModel = AiOutfitPreviewService.DefaultModel;
             return settings;
         }

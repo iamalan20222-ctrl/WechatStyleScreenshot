@@ -15,12 +15,13 @@ public sealed class CredentialStore
     public string? GetCredential(ImageEditProviderKind provider)
     {
         Dictionary<string, string> values = Read();
-        return values.GetValueOrDefault(provider.ToString());
+        string? key = values.GetValueOrDefault(provider.ToString());
+        return IsPlaceholder(key) ? null : key;
     }
 
     public void SaveCredential(ImageEditProviderKind provider, string key)
     {
-        if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("API key is required.", nameof(key));
+        if (IsPlaceholder(key)) throw new ArgumentException("A real API key is required.", nameof(key));
         Dictionary<string, string> values = Read();
         values[provider.ToString()] = key.Trim();
         Write(values);
@@ -31,6 +32,13 @@ public sealed class CredentialStore
         Dictionary<string, string> values = Read();
         values.Remove(provider.ToString());
         Write(values);
+    }
+
+    private static bool IsPlaceholder(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        string trimmed = value.Trim();
+        return trimmed.All(c => c is '●' or '•' or '*');
     }
 
     private Dictionary<string, string> Read()

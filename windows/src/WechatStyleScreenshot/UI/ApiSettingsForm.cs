@@ -7,12 +7,14 @@ public sealed class ApiSettingsForm : Form
 {
     private readonly OutfitSettingsStore _store;
     private readonly CredentialStore _credentials;
-    private readonly OutfitAppSettings _settings;
+    private OutfitAppSettings _settings;
     private readonly ComboBox _defaultProvider = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _editingProvider = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = true };
     private readonly TextBox _key = new() { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
-    private readonly ComboBox _model = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDown };
+    private readonly Button _reveal = new() { Text = "显示", Width = 56, Height = 27 };
+    private readonly ComboBox _model = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly Label _saveFeedback = new() { Dock = DockStyle.Fill, AutoSize = true };
     private readonly ComboBox _region = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly TextBox _workspace = new() { Dock = DockStyle.Fill };
     private readonly TextBox _baseUrl = new() { Dock = DockStyle.Fill };
@@ -44,10 +46,13 @@ public sealed class ApiSettingsForm : Form
         TableLayoutPanel keyRow = new() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         keyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         keyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-        Button reveal = new() { Text = "显示", Width = 56, Height = 27 };
-        reveal.Click += (_, _) => { _key.UseSystemPasswordChar = !_key.UseSystemPasswordChar; reveal.Text = _key.UseSystemPasswordChar ? "显示" : "隐藏"; };
+        _reveal.Click += (_, _) =>
+        {
+            _key.UseSystemPasswordChar = !_key.UseSystemPasswordChar;
+            _reveal.Text = _key.UseSystemPasswordChar ? "显示" : "隐藏";
+        };
         keyRow.Controls.Add(_key, 0, 0);
-        keyRow.Controls.Add(reveal, 1, 0);
+        keyRow.Controls.Add(_reveal, 1, 0);
         AddRow(layout, 3, "API Key", keyRow);
         AddRow(layout, 4, "Model", _model);
         layout.Controls.Add(_regionLabel, 0, 5);
@@ -61,7 +66,7 @@ public sealed class ApiSettingsForm : Form
         layout.SetColumnSpan(note, 2);
         FlowLayoutPanel buttons = new() { Dock = DockStyle.Fill, WrapContents = false };
         Button save = new() { Text = "保存", Width = 82, Height = 30 };
-        save.Click += (_, _) => Save();
+        save.Click += (_, _) => SaveSettings();
         Button delete = new() { Text = "删除 Key", Width = 92, Height = 30 };
         delete.Click += (_, _) => Delete();
         Button test = new() { Text = "测试连接", Width = 92, Height = 30 };
@@ -72,6 +77,8 @@ public sealed class ApiSettingsForm : Form
         buttons.Controls.Add(test);
         layout.Controls.Add(buttons, 0, 9);
         layout.SetColumnSpan(buttons, 2);
+        layout.Controls.Add(_saveFeedback, 0, 10);
+        layout.SetColumnSpan(_saveFeedback, 2);
 
         foreach (ImageEditProviderKind provider in Enum.GetValues<ImageEditProviderKind>())
         {
@@ -95,20 +102,24 @@ public sealed class ApiSettingsForm : Form
 
     private ImageEditProviderKind SelectedProvider => (ImageEditProviderKind)_editingProvider.SelectedIndex;
 
+    internal void SelectProviderForTesting(ImageEditProviderKind provider) => _editingProvider.SelectedIndex = (int)provider;
+
     private void LoadEditor()
     {
         _key.Clear();
         _key.UseSystemPasswordChar = true;
-        _model.DropDownStyle = ComboBoxStyle.DropDown;
+        _reveal.Text = "显示";
+        _saveFeedback.Text = string.Empty;
         _model.Items.Clear();
         switch (SelectedProvider)
         {
             case ImageEditProviderKind.Volcano:
-                _model.Text = _settings.VolcanoModel;
+                _model.Items.AddRange([AiOutfitPreviewService.ProModel, AiOutfitPreviewService.DefaultModel]);
+                _model.SelectedItem = _model.Items.Contains(_settings.VolcanoModel)
+                    ? _settings.VolcanoModel : AiOutfitPreviewService.DefaultModel;
                 break;
             case ImageEditProviderKind.Qwen:
                 _model.Items.AddRange(["qwen-image-3.0-pro", "qwen-image-3.0"]);
-                _model.DropDownStyle = ComboBoxStyle.DropDownList;
                 _model.SelectedItem = _model.Items.Contains(_settings.QwenModel) ? _settings.QwenModel : "qwen-image-3.0-pro";
                 _workspace.Text = _settings.QwenWorkspaceId;
                 _baseUrl.Text = _settings.QwenCustomBaseUrl;
@@ -116,7 +127,6 @@ public sealed class ApiSettingsForm : Form
                 break;
             case ImageEditProviderKind.OpenAI:
                 _model.Items.AddRange(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2"]);
-                _model.DropDownStyle = ComboBoxStyle.DropDownList;
                 _model.SelectedItem = _model.Items.Contains(_settings.OpenAiModel) ? _settings.OpenAiModel : "gpt-image-2.5-sunburst";
                 break;
         }
@@ -131,12 +141,12 @@ public sealed class ApiSettingsForm : Form
         _baseUrl.Visible = _baseUrlLabel.Visible = qwen && (_region.SelectedItem as RegionChoice)?.Id == "Custom";
     }
 
-    private void Save()
+    internal bool SaveSettings()
     {
-        if (string.IsNullOrWhiteSpace(_model.Text))
+        if (_model.SelectedItem is not string selectedModel)
         {
-            MessageBox.Show(this, "Model 不能为空。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return;
+            _saveFeedback.Text = "保存失败，请重试";
+            return false;
         }
         try
         {
@@ -144,25 +154,32 @@ public sealed class ApiSettingsForm : Form
             latest.DefaultProvider = (ImageEditProviderKind)_defaultProvider.SelectedIndex;
             switch (SelectedProvider)
             {
-                case ImageEditProviderKind.Volcano: latest.VolcanoModel = _model.Text.Trim(); break;
+                case ImageEditProviderKind.Volcano: latest.VolcanoModel = selectedModel; break;
                 case ImageEditProviderKind.Qwen:
-                    latest.QwenModel = _model.Text.Trim();
+                    latest.QwenModel = selectedModel;
                     latest.QwenRegion = (_region.SelectedItem as RegionChoice)?.Id ?? "Beijing";
                     latest.QwenWorkspaceId = _workspace.Text.Trim();
                     latest.QwenCustomBaseUrl = _baseUrl.Text.Trim();
                     QwenEndpointBuilder.Build(latest);
                     break;
-                case ImageEditProviderKind.OpenAI: latest.OpenAiModel = _model.Text.Trim(); break;
+                case ImageEditProviderKind.OpenAI: latest.OpenAiModel = selectedModel; break;
             }
             if (!string.IsNullOrWhiteSpace(_key.Text)) _credentials.SaveCredential(SelectedProvider, _key.Text);
             _store.Save(latest);
-            _settings.DefaultProvider = latest.DefaultProvider;
+            _settings = latest;
             _key.Clear();
+            _key.UseSystemPasswordChar = true;
+            _reveal.Text = "显示";
             RefreshStatus();
+            _saveFeedback.ForeColor = Color.ForestGreen;
+            _saveFeedback.Text = "✓ 已保存";
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException)
         {
-            MessageBox.Show(this, "保存失败，请检查 API 配置和用户目录权限。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            _saveFeedback.ForeColor = Color.Firebrick;
+            _saveFeedback.Text = "保存失败，请重试";
+            return false;
         }
     }
 
@@ -170,11 +187,19 @@ public sealed class ApiSettingsForm : Form
     {
         if (MessageBox.Show(this, "删除当前服务商保存的 API Key？", "确认删除", MessageBoxButtons.YesNo,
             MessageBoxIcon.Question) != DialogResult.Yes) return;
-        try { _credentials.DeleteCredential(SelectedProvider); _key.Clear(); RefreshStatus(); }
+        try { DeleteSavedKey(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
         {
             MessageBox.Show(this, "删除失败，请检查用户目录权限。", "删除失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
+    }
+
+    internal void DeleteSavedKey()
+    {
+        _credentials.DeleteCredential(SelectedProvider);
+        _key.Clear();
+        RefreshStatus();
+        _saveFeedback.Text = string.Empty;
     }
 
     private void RefreshStatus()
