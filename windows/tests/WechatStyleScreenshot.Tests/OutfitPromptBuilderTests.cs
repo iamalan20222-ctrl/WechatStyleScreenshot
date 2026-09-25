@@ -66,14 +66,17 @@ public class OutfitPromptBuilderTests
     }
 
     [Fact]
-    public void BikiniUsesGarmentReferencesButNotReferencePeople()
+    public void BikiniDefaultUsesAdultCommercialSwimwearPrompt()
     {
+        StyleSetting style = OutfitStyleCatalog.GetDefaultSetting(OutfitStylePresetType.Bikini);
+        Assert.Equal("比基尼", style.Title);
+        Assert.StartsWith("请将服装替换为一套适合设计参考的成人商业泳装。", style.Prompt);
+        Assert.Contains("同一个成年女性模特，在同一场景和同一拍摄瞬间", style.Prompt);
+        Assert.Contains("不透明", style.Prompt);
+        Assert.Contains("非情色", style.Prompt);
         string prompt = OutfitPromptBuilder.Build(new OutfitPreviewOptions(OutfitStylePresetType.Bikini));
+        Assert.Contains(style.Prompt, prompt);
         Assert.Contains("source screenshot is the only identity reference", prompt);
-        Assert.Contains("reference images 5-8", prompt);
-        Assert.Contains("swimwear cut, fabric, construction, and commercial photographic finish", prompt);
-        Assert.Contains("Never copy the people", prompt);
-        Assert.Contains("no thong or micro-bikini", prompt);
     }
 
     [Fact]

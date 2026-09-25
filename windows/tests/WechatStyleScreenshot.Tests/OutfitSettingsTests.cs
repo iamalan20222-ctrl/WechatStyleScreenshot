@@ -47,6 +47,60 @@ public class OutfitSettingsTests
         store.Save(settings);
         Assert.Equal("比基尼", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
         Assert.Equal(ImageEditProviderKind.OpenAI, store.Load().DefaultProvider);
+        Assert.Contains("成人商业泳装", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
+    }
+
+    [Fact]
+    public void PromptSettingsShowsSaveAndResetFeedbackOnlyAfterPersistence()
+    {
+        string path = TempFile("settings.json");
+        OutfitSettingsStore store = new(path);
+        Exception? failure = null;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                using PromptSettingsForm form = new(store);
+                Assert.True(form.SaveSettingsForTesting());
+                Assert.Equal("✓ 已保存", form.SaveFeedbackForTesting);
+                Assert.True(File.Exists(path));
+                Assert.True(form.ResetStyleAndSaveForTesting(OutfitStylePresetType.Bikini));
+                Assert.Equal("✓ 已恢复并保存", form.SaveFeedbackForTesting);
+                Assert.Contains("成人商业泳装", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
+                Assert.True(form.ResetAllAndSaveForTesting());
+                Assert.Equal("✓ 已全部恢复并保存", form.SaveFeedbackForTesting);
+                form.SetTitleForTesting(OutfitStylePresetType.Sport, " ");
+                Assert.False(form.SaveSettingsForTesting());
+                Assert.Equal("保存失败，请重试", form.SaveFeedbackForTesting);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void PromptSettingsReportsDiskSaveFailureWithoutSuccessFeedback()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"), "settings.json");
+        Directory.CreateDirectory(path);
+        Exception? failure = null;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                using PromptSettingsForm form = new(new OutfitSettingsStore(path));
+                Assert.False(form.SaveSettingsForTesting());
+                Assert.Equal("保存失败，请重试", form.SaveFeedbackForTesting);
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
     }
 
     [Fact]

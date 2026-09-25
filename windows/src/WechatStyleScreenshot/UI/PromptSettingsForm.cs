@@ -8,6 +8,8 @@ public sealed class PromptSettingsForm : Form
     private readonly OutfitAppSettings _settings;
     private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
     private readonly Dictionary<OutfitStylePresetType, (TextBox Title, TextBox Prompt)> _editors = new();
+    private readonly Label _saveFeedback = new() { AutoSize = true, Padding = new Padding(8, 7, 0, 0) };
+    private readonly System.Windows.Forms.Timer _feedbackTimer = new() { Interval = 1800 };
 
     public PromptSettingsForm(OutfitSettingsStore store)
     {
@@ -18,6 +20,8 @@ public sealed class PromptSettingsForm : Form
         MinimumSize = new Size(560, 600);
         Size = new Size(680, 680);
         Font = new Font("Microsoft YaHei UI", 9f);
+        _feedbackTimer.Tick += (_, _) => { _feedbackTimer.Stop(); _saveFeedback.Text = string.Empty; };
+        Disposed += (_, _) => _feedbackTimer.Dispose();
 
         TableLayoutPanel layout = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(12) };
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -29,17 +33,17 @@ public sealed class PromptSettingsForm : Form
 
         FlowLayoutPanel footer = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         Button save = new() { Text = "保存", Width = 90, Height = 32 };
-        save.Click += (_, _) => SaveSettings();
+        save.Click += (_, _) => SaveSettings("✓ 已保存");
         Button resetAll = new() { Text = "全部恢复默认", Width = 120, Height = 32 };
         resetAll.Click += (_, _) =>
         {
             if (MessageBox.Show(this, "恢复所有款式的默认标题和风格提示词？", "确认恢复", MessageBoxButtons.YesNo,
                 MessageBoxIcon.Question) != DialogResult.Yes) return;
-            foreach (OutfitStylePreset preset in OutfitStyleCatalog.All) ResetEditor(preset.Type);
-            SaveSettings();
+            ResetAllAndSaveForTesting();
         };
         footer.Controls.Add(save);
         footer.Controls.Add(resetAll);
+        footer.Controls.Add(_saveFeedback);
         layout.Controls.Add(footer, 0, 1);
     }
 
@@ -70,7 +74,7 @@ public sealed class PromptSettingsForm : Form
         Button preview = new() { Text = "查看最终提示词", Width = 130, Height = 30 };
         preview.Click += (_, _) => ShowPreview(preset.Type);
         Button reset = new() { Text = "恢复此款默认", Width = 120, Height = 30 };
-        reset.Click += (_, _) => { ResetEditor(preset.Type); SaveSettings(); };
+        reset.Click += (_, _) => ResetStyleAndSaveForTesting(preset.Type);
         commands.Controls.Add(preview);
         commands.Controls.Add(reset);
         panel.Controls.Add(commands, 0, 4);
@@ -83,23 +87,55 @@ public sealed class PromptSettingsForm : Form
         panel.Controls.Add(locked, 0, 6);
     }
 
-    private void SaveSettings()
+    internal string SaveFeedbackForTesting => _saveFeedback.Text;
+
+    internal void SetTitleForTesting(OutfitStylePresetType type, string title) => _editors[type].Title.Text = title;
+
+    internal bool SaveSettingsForTesting() => SaveSettings("✓ 已保存");
+
+    internal bool ResetStyleAndSaveForTesting(OutfitStylePresetType type)
+    {
+        ResetEditor(type);
+        return SaveSettings("✓ 已恢复并保存");
+    }
+
+    internal bool ResetAllAndSaveForTesting()
+    {
+        foreach (OutfitStylePreset preset in OutfitStyleCatalog.All) ResetEditor(preset.Type);
+        return SaveSettings("✓ 已全部恢复并保存");
+    }
+
+    private bool SaveSettings(string successText)
     {
         OutfitAppSettings latest = _store.Load();
         foreach ((OutfitStylePresetType type, (TextBox title, TextBox prompt)) in _editors)
         {
             if (string.IsNullOrWhiteSpace(title.Text) || string.IsNullOrWhiteSpace(prompt.Text))
             {
-                MessageBox.Show(this, "风格名称和提示词不能为空。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
+                ShowFeedback("保存失败，请重试", false);
+                return false;
             }
             latest.SetStyle(type, new StyleSetting { Title = title.Text.Trim(), Prompt = prompt.Text.Trim() });
         }
-        try { _store.Save(latest); }
+        try
+        {
+            _store.Save(latest);
+            ShowFeedback(successText, true);
+            return true;
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            MessageBox.Show(this, "保存设置失败，请检查用户目录权限。", "保存失败", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ShowFeedback("保存失败，请重试", false);
+            return false;
         }
+    }
+
+    private void ShowFeedback(string message, bool success)
+    {
+        _feedbackTimer.Stop();
+        _saveFeedback.ForeColor = success ? Color.ForestGreen : Color.Firebrick;
+        _saveFeedback.Text = message;
+        _feedbackTimer.Start();
     }
 
     private void ResetEditor(OutfitStylePresetType type)

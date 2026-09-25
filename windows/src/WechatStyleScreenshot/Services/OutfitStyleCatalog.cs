@@ -16,7 +16,32 @@ public static class OutfitStyleCatalog
         OutfitStylePresetType.Bikini => new StyleSetting
         {
             Title = "比基尼",
-            Prompt = "Create premium, production-feasible bikini / swimwear. Garment-only cues distilled from reference images 5-8 (the images are not uploaded): gathered bandeau with center ruching, muted textured triangle with matching bottoms, solid-color halter with a modest neckline, or opaque asymmetric top with restrained ring detail. Use reference photos only for swimwear cut, fabric, construction, and commercial photographic finish. Never copy the people, faces, bodies, poses, or scenery. Choose one coherent direction; maintain proper opaque coverage, secure straps, natural seams, fabric tension, occlusion, and source-consistent lighting; no thong or micro-bikini."
+            Prompt = """
+请将服装替换为一套适合设计参考的成人商业泳装。
+
+要求：
+- 只替换衣物
+- 保持人物身份、脸部、发型、肤色、身材比例、姿势、动作、背景、光线和构图不变
+- 风格为真实、自然、专业的商业泳装摄影效果
+- 服装必须真实可穿着，结构合理，面料自然，细节清晰
+- 必须是正常完整覆盖的成人泳装
+- 不透明
+- 不露点
+- 不暴露私密部位
+- 非情色
+- 非挑逗
+- 适合作为泳装设计参考
+
+可随机生成不同方向，例如：
+- 极简高级泳装
+- 运动感泳装
+- 度假风泳装
+- 复古泳装
+- 时装感泳装
+
+最终效果应为：
+同一个成年女性模特，在同一场景和同一拍摄瞬间，仅将原有服装自然替换为一套高质量、真实、专业的成人商业泳装。
+"""
         },
         OutfitStylePresetType.JK => new StyleSetting
         {
