@@ -17,6 +17,17 @@ public sealed class OcrIntegrationTests
     }
 
     [Fact]
+    public async Task RecognizesLineBoundsLocally()
+    {
+        using Bitmap bitmap = LoadFixture("ocr-english.png");
+        using OcrService service = new();
+        var regions = await service.RecognizeRegionsAsync(bitmap);
+        Assert.Contains(regions, region => region.Text.Contains("Hello", StringComparison.OrdinalIgnoreCase)
+            && region.Bounds.Width > 0 && region.Bounds.Height > 0
+            && region.Bounds.Left >= 0 && region.Bounds.Right <= bitmap.Width);
+    }
+
+    [Fact]
     public async Task RecognizesSimplifiedChineseFromFixedBitmap()
     {
         using Bitmap bitmap = LoadFixture("ocr-chinese.png");

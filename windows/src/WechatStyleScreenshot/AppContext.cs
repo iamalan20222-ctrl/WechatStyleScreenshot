@@ -45,7 +45,8 @@ public sealed class TrayApplicationContext : ApplicationContext
             new ClipboardManager(),
             new OcrService(),
             ShowOcrNotification,
-            new ConfiguredOutfitPreviewService(_outfitSettings, _credentials), _outfitSettings);
+            new ConfiguredOutfitPreviewService(_outfitSettings, _credentials), _outfitSettings,
+            new DeepSeekTranslationService(_credentials, _outfitSettings));
         _hotkeyManager.HotkeyPressed += (_, args) => _screenshotController.BeginCapture(args.Action == HotkeyAction.Ocr);
 
         ToolStripMenuItem startupItem = new("开机启动")

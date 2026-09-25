@@ -121,6 +121,12 @@ AI 结果生成后，可在选区图片内按住鼠标左键临时查看原图�
 
 Windows 按 `Alt + Shift + A` 后拖拽选区，松开鼠标即开始识别；也可在普通截图模式中点击工具栏“文”。macOS 按 `Option + Shift + A` 并使用系统框选截图。中英文识别结果会直接复制到系统剪贴板；未识别到文字时不会覆盖已有剪贴板内容。
 
+## Windows 截图翻译
+
+`Alt + A` 框选后点击工具栏“译”，程序先在本机用 Tesseract 识别文字及位置，再仅将识别出的文字批量发送给 DeepSeek。翻译结果由本机绘制在当前选区内；“✓”复制当前看到的翻译图片，`Ctrl + Z` 撤销翻译。截图像素、桌面内容和 OCR 坐标不会发送给 DeepSeek。翻译过程可用 `Esc` 取消，不会另开窗口。
+
+首次使用时，在托盘“添加 APIKEY”窗口的“翻译 API”页单独配置 DeepSeek Key。该 Key 由 Windows 当前用户 DPAPI 加密保存，不写入 `settings.json`；默认模型为 `deepseek-v4-flash`，也可选择 `deepseek-v4-pro`。可选择简体中文、English、日本語或 한국어。服务商可能记录收到的 OCR 文本，请避免翻译包含敏感信息的截图。
+
 Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。macOS 使用系统 Vision 框架。两端识别都在本机完成，不调用云端服务。
 
 ## 隐私

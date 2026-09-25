@@ -18,6 +18,8 @@ public sealed class ScreenshotController
     private readonly OutfitSettingsStore? _settingsStore;
     private ScreenshotOverlayForm? _overlay;
     private readonly OutfitPreviewRequestGate _outfitRequestGate = new();
+    private readonly ITranslationService? _translationService;
+    private CancellationTokenSource? _translationCancellation;
     private bool _isCapturing;
     private bool _disposed;
     private int _outfitRequestSequence;
@@ -32,7 +34,8 @@ public sealed class ScreenshotController
         ClipboardManager clipboardManager,
         OcrService ocrService,
         Action<string> notify,
-        IOutfitGenerationService? outfitPreviewService = null, OutfitSettingsStore? settingsStore = null)
+        IOutfitGenerationService? outfitPreviewService = null, OutfitSettingsStore? settingsStore = null,
+        ITranslationService? translationService = null)
     {
         _captureEngine = captureEngine;
         _clipboardManager = clipboardManager;
@@ -40,6 +43,7 @@ public sealed class ScreenshotController
         _outfitPreviewService = outfitPreviewService ?? new AiOutfitPreviewService();
         _notify = notify;
         _settingsStore = settingsStore;
+        _translationService = translationService;
     }
 
     public void BeginCapture(bool extractTextOnSelection = false)
@@ -73,6 +77,8 @@ public sealed class ScreenshotController
             _settingsStore is null ? null : () => _settingsStore.Load().GetEnabledStyles());
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
+        _overlay.TranslationStartRequested += TryStartTranslation;
+        _overlay.TranslationCancellationRequested += OnTranslationCancellationRequested;
         _overlay.OutfitPreviewStartRequested += TryStartOutfitPreview;
         _overlay.OutfitPreviewCancellationRequested += OnOutfitCancellationRequested;
         _overlay.CaptureCancelled += OnCaptureCancelled;
@@ -129,8 +135,9 @@ public sealed class ScreenshotController
 
         try
         {
-            Bitmap? outfitResult = overlay.CreateOutfitResultImage();
-            using Bitmap bitmap = outfitResult ?? overlay.CreateOriginalSelectionImage();
+            using Bitmap? translationResult = overlay.CreateTranslationResultImage();
+            using Bitmap? outfitResult = translationResult is null ? overlay.CreateOutfitResultImage() : null;
+            using Bitmap bitmap = translationResult ?? outfitResult ?? overlay.CreateOriginalSelectionImage();
             Trace.WriteLine($"[Clipboard] CONFIRM_CLICKED HAS_OUTFIT_RESULT={outfitResult is not null} IMAGE_WIDTH={bitmap.Width} IMAGE_HEIGHT={bitmap.Height} PIXEL_FORMAT={bitmap.PixelFormat} CLIPBOARD_THREAD_APARTMENT={Thread.CurrentThread.GetApartmentState()}");
             if (!_clipboardManager.TrySetImage(bitmap))
             {
@@ -139,7 +146,7 @@ public sealed class ScreenshotController
                 return;
             }
 
-            _notify(outfitResult is null ? "截图已复制" : "AI 图片已复制到剪贴板");
+            _notify(translationResult is not null ? "翻译图片已复制" : outfitResult is null ? "截图已复制" : "AI 图片已复制到剪贴板");
             ResetOverlay();
         }
         catch (Exception ex)
@@ -153,9 +160,87 @@ public sealed class ScreenshotController
 
     private void OnCaptureCancelled(object? sender, EventArgs e)
     {
+        _translationCancellation?.Cancel();
         _outfitRequestGate.CancelActive();
         ResetOverlay();
     }
+
+    private bool TryStartTranslation(ScreenshotOverlayForm overlay)
+    {
+        if (_disposed || !ReferenceEquals(_overlay, overlay) || _translationService is null) return false;
+        if (_translationCancellation is not null)
+        {
+            overlay.ShowOutfitNotice("翻译服务准备中…", TimeSpan.FromSeconds(1));
+            return false;
+        }
+        if (!overlay.TryBeginTranslation()) return false;
+        CancellationTokenSource cancellation = new();
+        _translationCancellation = cancellation;
+        _ = RunTranslationAsync(overlay, cancellation);
+        return true;
+    }
+
+    private async Task RunTranslationAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation)
+    {
+        void ReleaseRequest()
+        {
+            if (!ReferenceEquals(_translationCancellation, cancellation)) return;
+            _translationCancellation = null;
+            cancellation.Dispose();
+        }
+        try
+        {
+            using Bitmap source = overlay.CreateTranslationSourceImage();
+            IReadOnlyList<OcrTextRegion> regions = await _ocrService.RecognizeRegionsAsync(source, cancellation.Token);
+            if (cancellation.IsCancellationRequested || overlay.IsDisposed) return;
+            if (regions.Count == 0 || regions.All(region => !DeepSeekTranslationService.ShouldTranslate(region.Text)))
+            {
+                overlay.FailTranslation("未识别到可翻译文字");
+                return;
+            }
+            overlay.SetTranslationState(TranslationState.Translating);
+            string target = _settingsStore?.Load().TranslationTargetLanguage ?? "简体中文";
+            TranslationResult result = await _translationService!.TranslateAsync(regions, target, cancellation.Token);
+            if (cancellation.IsCancellationRequested || overlay.IsDisposed) return;
+            if (result.Status != TranslationStatus.Success || result.Translations is null)
+            {
+                overlay.FailTranslation(result.Status switch
+                {
+                    TranslationStatus.ApiKeyMissing => "未配置 DeepSeek API Key",
+                    TranslationStatus.Unauthorized => "DeepSeek API Key 无效",
+                    TranslationStatus.RateLimited => "翻译请求过于频繁，请稍后重试",
+                    TranslationStatus.QuotaExceeded => "翻译额度不足",
+                    TranslationStatus.TimedOut => "翻译超时，请重试",
+                    TranslationStatus.NetworkError => "网络连接失败",
+                    TranslationStatus.ServerError => "翻译服务暂时不可用",
+                    _ => "翻译失败，请重试"
+                });
+                return;
+            }
+            overlay.SetTranslationState(TranslationState.Applying);
+            Bitmap image = ScreenshotTranslationRenderer.Render(source, regions, result.Translations);
+            if (cancellation.IsCancellationRequested || overlay.IsDisposed) image.Dispose();
+            else
+            {
+                ReleaseRequest();
+                overlay.CompleteTranslation(image);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Translation failed: {ex.GetType().Name}");
+            if (!overlay.IsDisposed && !overlay.Disposing && !cancellation.IsCancellationRequested) overlay.FailTranslation("翻译失败，请重试");
+        }
+        finally
+        {
+            bool cancelled = cancellation.IsCancellationRequested;
+            ReleaseRequest();
+            if (!overlay.IsDisposed && !overlay.Disposing && cancelled) overlay.SetTranslationState(TranslationState.None);
+        }
+    }
+
+    private void OnTranslationCancellationRequested(object? sender, EventArgs e) => _translationCancellation?.Cancel();
 
     private bool TryStartOutfitPreview(ScreenshotOverlayForm overlay, OutfitStylePresetType style)
     {
@@ -327,6 +412,7 @@ public sealed class ScreenshotController
 
     private void OnOverlayClosed(object? sender, FormClosedEventArgs e)
     {
+        _translationCancellation?.Cancel();
         _outfitRequestGate.CancelActive();
         _isCapturing = false;
         _overlay = null;
@@ -342,9 +428,12 @@ public sealed class ScreenshotController
         }
 
         _outfitRequestGate.CancelActive();
+        _translationCancellation?.Cancel();
 
         overlay.SelectionCompleted -= OnSelectionCompleted;
         overlay.TextExtractionRequested -= OnTextExtractionRequested;
+        overlay.TranslationStartRequested -= TryStartTranslation;
+        overlay.TranslationCancellationRequested -= OnTranslationCancellationRequested;
         overlay.OutfitPreviewStartRequested -= TryStartOutfitPreview;
         overlay.OutfitPreviewCancellationRequested -= OnOutfitCancellationRequested;
         overlay.CaptureCancelled -= OnCaptureCancelled;

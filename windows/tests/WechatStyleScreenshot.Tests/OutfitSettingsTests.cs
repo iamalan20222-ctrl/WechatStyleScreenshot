@@ -295,11 +295,11 @@ public class OutfitSettingsTests
             try
             {
                 using ApiSettingsForm form = new(new OutfitSettingsStore(Path.Combine(directory, "settings.json")), credentials);
-                TextBox password = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+                TextBox password = Descendants(form).OfType<TextBox>().Single(box => box.Name == "ImageApiKey");
                 Assert.Equal(new string('•', 20), password.Text);
                 Assert.True(form.ShowingSavedCredentialMaskForTesting);
                 Assert.DoesNotContain("test-saved-key", password.Text);
-                Assert.False(Descendants(form).OfType<Button>().Single(button => button.Text == "显示").Enabled);
+                Assert.False(Descendants(form).OfType<Button>().Single(button => button.Name == "ImageReveal").Enabled);
             }
             catch (Exception ex) { failure = ex; }
         });
@@ -327,12 +327,12 @@ public class OutfitSettingsTests
             {
                 form.Show();
                 form.SelectProviderForTesting(provider);
-                TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+                TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.Name == "ImageApiKey");
                 input.Text = testKey;
                 Assert.Equal(19, input.TextLength);
                 Assert.Equal(testKey, input.Text);
                 Assert.True(input.UseSystemPasswordChar);
-                Button reveal = Descendants(form).OfType<Button>().Single(button => button.Text == "显示");
+                Button reveal = Descendants(form).OfType<Button>().Single(button => button.Name == "ImageReveal");
                 reveal.PerformClick();
                 Assert.False(input.UseSystemPasswordChar);
                 Assert.Equal("隐藏", reveal.Text);
@@ -351,7 +351,7 @@ public class OutfitSettingsTests
             using ApiSettingsForm reopened = new(settings, credentials);
             reopened.Show();
             reopened.SelectProviderForTesting(provider);
-            TextBox masked = Descendants(reopened).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+            TextBox masked = Descendants(reopened).OfType<TextBox>().Single(box => box.Name == "ImageApiKey");
             Assert.Equal(new string('•', 20), masked.Text);
             Assert.True(reopened.ShowingSavedCredentialMaskForTesting);
             Assert.Contains("已配置", Descendants(reopened).OfType<Label>()
@@ -392,7 +392,7 @@ public class OutfitSettingsTests
         RunOnSta(() =>
         {
             using ApiSettingsForm form = new(new OutfitSettingsStore(Path.Combine(directory, "settings.json")), credentials);
-            TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+            TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.Name == "ImageApiKey");
             Assert.Equal(new string('•', 20), input.Text);
             form.SelectProviderForTesting(ImageEditProviderKind.Qwen);
             Assert.Equal(string.Empty, input.Text);

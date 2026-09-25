@@ -22,6 +22,8 @@ public sealed class OutfitAppSettings
     public string QwenWorkspaceId { get; set; } = "";
     public string QwenCustomBaseUrl { get; set; } = "";
     public string OpenAiModel { get; set; } = "gpt-image-2.5-sunburst";
+    public string DeepSeekModel { get; set; } = "deepseek-v4-flash";
+    public string TranslationTargetLanguage { get; set; } = "简体中文";
 
     public StyleSetting GetStyle(OutfitStylePresetType type)
     {

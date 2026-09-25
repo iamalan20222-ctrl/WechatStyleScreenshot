@@ -10,7 +10,7 @@ namespace WechatStyleScreenshot.UI;
 public sealed class ScreenshotOverlayForm : Form
 {
     private const int HandleSize = 9;
-    private const int ToolbarWidth = 202;
+    private const int ToolbarWidth = 248;
     private const int ToolbarHeight = 46;
     private const int ToolbarGap = 14;
     private const int ToolbarButtonSize = 30;
@@ -30,6 +30,7 @@ public sealed class ScreenshotOverlayForm : Form
     private Rectangle _toolbarBounds;
     private Rectangle _cancelButtonBounds;
     private Rectangle _ocrButtonBounds;
+    private Rectangle _translationButtonBounds;
     private Rectangle _outfitButtonBounds;
     private Rectangle _confirmButtonBounds;
     private Rectangle _stylePickerBounds;
@@ -54,9 +55,15 @@ public sealed class ScreenshotOverlayForm : Form
     private DateTime _outfitNoticeExpiresAt;
     private string? _outfitNotice;
     private int _loadingFrame;
+    private TranslationState _translationState;
+    private Bitmap? _translationResultImage;
+    private string? _translationError;
+    private long _translationStartedAt;
 
     public event EventHandler<Rectangle>? SelectionCompleted;
     public event EventHandler<Rectangle>? TextExtractionRequested;
+    public event Func<ScreenshotOverlayForm, bool>? TranslationStartRequested;
+    public event EventHandler? TranslationCancellationRequested;
     public event Func<ScreenshotOverlayForm, OutfitStylePresetType, bool>? OutfitPreviewStartRequested;
     public event EventHandler? OutfitPreviewCancellationRequested;
     public event EventHandler? CaptureCancelled;
@@ -64,6 +71,14 @@ public sealed class ScreenshotOverlayForm : Form
 
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
+    internal TranslationState TranslationStateForTesting => _translationState;
+    internal bool HasTranslationResultForTesting => _translationResultImage is not null;
+    internal bool ClickTranslationButtonForTesting()
+    {
+        Point center = new(_translationButtonBounds.Left + 15, _translationButtonBounds.Top + 15);
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+        return _translationState == TranslationState.Recognizing;
+    }
     internal bool IsHoldingOriginalPreviewForTesting => _isHoldingOriginalPreview;
     internal Rectangle SelectionForTesting => _selection;
     internal bool IsStylePickerOpenForTesting => _stylePickerOpen;
@@ -166,6 +181,13 @@ public sealed class ScreenshotOverlayForm : Form
     {
         base.OnMouseDown(e);
 
+        if (IsTranslationBusy)
+        {
+            if (e.Button == MouseButtons.Right || (e.Button == MouseButtons.Left && _cancelButtonBounds.Contains(e.Location)))
+                TranslationCancellationRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
         if (_outfitSession?.IsBusy == true)
         {
             if (e.Button == MouseButtons.Right || (e.Button == MouseButtons.Left && _cancelButtonBounds.Contains(e.Location)))
@@ -230,6 +252,12 @@ public sealed class ScreenshotOverlayForm : Form
                 return;
             }
 
+            if (_translationButtonBounds.Contains(e.Location))
+            {
+                TranslationStartRequested?.Invoke(this);
+                return;
+            }
+
             if (_outfitButtonBounds.Contains(e.Location))
             {
                 RequestOutfitPreview();
@@ -238,7 +266,7 @@ public sealed class ScreenshotOverlayForm : Form
 
             SelectionHitTarget target = SelectionMath.HitTest(_selection, e.Location, HandleSize + 6);
             if (target == SelectionHitTarget.Move && !_toolbarBounds.Contains(e.Location) &&
-                _outfitSession is { State: OutfitPreviewState.Success, HasResult: true })
+                (_outfitSession is { State: OutfitPreviewState.Success, HasResult: true } || _translationResultImage is not null))
             {
                 _isHoldingOriginalPreview = true;
                 Capture = true;
@@ -274,7 +302,7 @@ public sealed class ScreenshotOverlayForm : Form
             return;
         }
 
-        if (_outfitSession?.IsBusy == true)
+        if (_outfitSession?.IsBusy == true || IsTranslationBusy)
         {
             Cursor = Cursors.Default;
             return;
@@ -305,7 +333,7 @@ public sealed class ScreenshotOverlayForm : Form
         {
             if (_hasSelection)
             {
-                ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
+                ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _translationButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
                 UpdateHoveredToolbarButton(hoveredButton);
                 if (hoveredButton == ToolbarButtonHit.OutfitPreview)
                     _toolTip.Show("再试一款", this, e.X + 8, e.Y + 8, 900);
@@ -463,7 +491,8 @@ public sealed class ScreenshotOverlayForm : Form
     {
         ResetOriginalComparePreview();
         if (IsDisposed || Disposing || !_hasSelection || !SelectionMath.IsCapturable(_selection) ||
-            _outfitSession is null || !_outfitSession.TryBegin()) return false;
+            _outfitSession is null || IsTranslationBusy || !_outfitSession.TryBegin()) return false;
+        ClearTranslationResult();
         CloseStylePicker();
         _outfitCancellationRequested = false;
         _outfitNotice = null;
@@ -482,15 +511,17 @@ public sealed class ScreenshotOverlayForm : Form
         if (e.KeyCode == Keys.Escape)
         {
             ResetOriginalComparePreview();
-            if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
+            if (IsTranslationBusy) TranslationCancellationRequested?.Invoke(this, EventArgs.Empty);
+            else if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
             else if (_stylePickerOpen) CloseStylePicker();
             else CancelCapture();
         }
         else if (e.Control && e.KeyCode == Keys.Z)
         {
-            RestoreOutfitOriginal();
+            if (_translationResultImage is not null) ClearTranslationResult();
+            else RestoreOutfitOriginal();
         }
-        else if (e.KeyCode == Keys.Enter && _hasSelection && _outfitSession?.IsBusy != true)
+        else if (e.KeyCode == Keys.Enter && _hasSelection && _outfitSession?.IsBusy != true && !IsTranslationBusy)
         {
             ConfirmSelection();
         }
@@ -511,7 +542,12 @@ public sealed class ScreenshotOverlayForm : Form
         }
 
         Rectangle selection = _hasSelection ? _selection : SelectionMath.FromPoints(_dragStart, _dragCurrent);
-        if (_outfitSession?.HasResult == true && _outfitSession.ResultImage is Bitmap outfitResult)
+        if (_translationResultImage is Bitmap translationResult)
+        {
+            if (_isHoldingOriginalPreview) e.Graphics.DrawImage(_desktopSnapshot, selection, selection, GraphicsUnit.Pixel);
+            else e.Graphics.DrawImage(translationResult, selection);
+        }
+        else if (_outfitSession?.HasResult == true && _outfitSession.ResultImage is Bitmap outfitResult)
         {
             if (_isHoldingOriginalPreview)
                 e.Graphics.DrawImage(_outfitSession.OriginalImage, selection);
@@ -540,9 +576,11 @@ public sealed class ScreenshotOverlayForm : Form
             DrawSizeLabel(e.Graphics, selection);
         }
 
-        if (_outfitSession is { State: not OutfitPreviewState.None and not OutfitPreviewState.Success } || _outfitNotice is not null)
+        if (IsTranslationBusy || _translationState == TranslationState.Error ||
+            _outfitSession is { State: not OutfitPreviewState.None and not OutfitPreviewState.Success } || _outfitNotice is not null)
         {
-            DrawOutfitStatus(e.Graphics, selection);
+            if (IsTranslationBusy || _translationState == TranslationState.Error) DrawTranslationStatus(e.Graphics, selection);
+            else DrawOutfitStatus(e.Graphics, selection);
         }
 
         if (_hasSelection)
@@ -561,6 +599,7 @@ public sealed class ScreenshotOverlayForm : Form
             _outfitTimer.Dispose();
             _toolTip.Dispose();
             _outfitSession?.Dispose();
+            _translationResultImage?.Dispose();
             _outfitSession = null;
             _desktopSnapshot.Dispose();
         }
@@ -600,7 +639,8 @@ public sealed class ScreenshotOverlayForm : Form
         _toolbarBounds = new Rectangle(x, y, ToolbarWidth, ToolbarHeight);
         _cancelButtonBounds = new Rectangle(_toolbarBounds.Left + 16, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
-        _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _translationButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 155, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _confirmButtonBounds = new Rectangle(_toolbarBounds.Right - 16 - ToolbarButtonSize, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         UpdateStylePickerBounds();
     }
@@ -716,6 +756,58 @@ public sealed class ScreenshotOverlayForm : Form
         return _desktopSnapshot.Clone(_selection, PixelFormat.Format32bppArgb);
     }
 
+    public Bitmap? CreateTranslationResultImage() => _translationResultImage is null ? null : new Bitmap(_translationResultImage);
+
+    public bool TryBeginTranslation()
+    {
+        if (!_hasSelection || IsTranslationBusy || _outfitSession?.IsBusy == true) return false;
+        ClearTranslationResult();
+        _translationState = TranslationState.Recognizing;
+        _translationStartedAt = Stopwatch.GetTimestamp();
+        _outfitTimer.Start();
+        Invalidate(_selection);
+        return true;
+    }
+
+    public Bitmap CreateTranslationSourceImage() => CreateOutfitResultImage() ?? CreateOriginalSelectionImage();
+
+    public void SetTranslationState(TranslationState state)
+    {
+        if (IsDisposed || Disposing) return;
+        _translationState = state;
+        Invalidate(_selection);
+    }
+
+    public void CompleteTranslation(Bitmap result)
+    {
+        if (IsDisposed || Disposing) { result.Dispose(); return; }
+        _translationResultImage?.Dispose();
+        _translationResultImage = result;
+        _translationState = TranslationState.Success;
+        _outfitTimer.Stop();
+        Invalidate(_selection);
+    }
+
+    public void FailTranslation(string message)
+    {
+        if (IsDisposed || Disposing) return;
+        _translationError = message;
+        _translationState = TranslationState.Error;
+        _outfitErrorExpiresAt = DateTime.UtcNow.AddSeconds(2);
+        _outfitTimer.Start();
+        Invalidate(_selection);
+    }
+
+    public void ClearTranslationResult()
+    {
+        _translationResultImage?.Dispose();
+        _translationResultImage = null;
+        _translationState = TranslationState.None;
+        if (!IsDisposed && !Disposing && _hasSelection) Invalidate(_selection);
+    }
+
+    private bool IsTranslationBusy => _translationState is TranslationState.Recognizing or TranslationState.Translating or TranslationState.Applying;
+
     private void RequestOutfitCancellation()
     {
         if (_outfitSession?.IsBusy != true || _outfitCancellationRequested) return;
@@ -736,6 +828,7 @@ public sealed class ScreenshotOverlayForm : Form
     private void ResetOutfitForSelection()
     {
         ResetOriginalComparePreview();
+        ClearTranslationResult();
         CloseStylePicker();
         _outfitTimer.Stop();
         _outfitSession?.Dispose();
@@ -752,6 +845,12 @@ public sealed class ScreenshotOverlayForm : Form
     private void OnOutfitTimerTick(object? sender, EventArgs e)
     {
         if (IsDisposed || Disposing) return;
+        if (IsTranslationBusy) { _loadingFrame = (_loadingFrame + 1) % 16; Invalidate(_selection); return; }
+        if (_translationState == TranslationState.Error)
+        {
+            if (DateTime.UtcNow >= _outfitErrorExpiresAt) { _translationState = TranslationState.None; _outfitTimer.Stop(); Invalidate(_selection); }
+            return;
+        }
         if (_outfitSession?.IsBusy == true)
         {
             _loadingFrame = (_loadingFrame + 1) % 16;
@@ -842,6 +941,30 @@ public sealed class ScreenshotOverlayForm : Form
         graphics.Restore(state);
     }
 
+    private void DrawTranslationStatus(Graphics graphics, Rectangle selection)
+    {
+        using SolidBrush shade = new(Color.FromArgb(110, Color.Black));
+        using SolidBrush ink = new(Color.White);
+        using Font font = new("Microsoft YaHei UI", 12f, FontStyle.Bold);
+        using StringFormat centered = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+        graphics.FillRectangle(shade, selection);
+        string message = _translationState switch
+        {
+            TranslationState.Recognizing => "正在识别文字…",
+            TranslationState.Translating => "正在翻译…",
+            TranslationState.Applying => "正在生成翻译截图…",
+            TranslationState.Error => _translationError ?? "翻译失败，请重试",
+            _ => ""
+        };
+        graphics.DrawString(message, font, ink, selection, centered);
+        if (IsTranslationBusy)
+        {
+            int elapsed = (int)Stopwatch.GetElapsedTime(_translationStartedAt).TotalSeconds;
+            Rectangle timer = new(selection.Left, selection.Top + selection.Height / 2 + 22, selection.Width, 28);
+            graphics.DrawString($"已等待 {elapsed} 秒", font, ink, timer, centered);
+        }
+    }
+
     private void DrawToolbar(Graphics graphics)
     {
         using System.Drawing.Drawing2D.GraphicsPath path = RoundedRectangle(_toolbarBounds, 8);
@@ -858,6 +981,9 @@ public sealed class ScreenshotOverlayForm : Form
         using SolidBrush ocrBrush = new(Color.WhiteSmoke);
         using StringFormat ocrFormat = new() { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         graphics.DrawString("文", ocrFont, ocrBrush, _ocrButtonBounds, ocrFormat);
+
+        DrawButtonHover(graphics, _translationButtonBounds, ToolbarButtonHit.Translation);
+        graphics.DrawString("译", ocrFont, ocrBrush, _translationButtonBounds, ocrFormat);
 
         DrawButtonHover(graphics, _outfitButtonBounds, ToolbarButtonHit.OutfitPreview);
         graphics.DrawString("试", ocrFont, ocrBrush, _outfitButtonBounds, ocrFormat);

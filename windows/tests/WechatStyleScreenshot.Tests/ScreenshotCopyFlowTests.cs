@@ -60,6 +60,28 @@ public class ScreenshotCopyFlowTests
         Assert.Contains("AI 图片已复制到剪贴板", notices);
     }
 
+    [Fact]
+    public void TranslationCopyUsesVisibleResultAndFailedWriteKeepsOverlay()
+    {
+        using TestImageClipboard backend = new() { BusyWritesRemaining = 100 };
+        RunOnUiThread(backend, _ => { }, overlay =>
+        {
+            Assert.True(overlay.TryBeginTranslation());
+            using Bitmap translated = new(100, 80);
+            using (Graphics graphics = Graphics.FromImage(translated)) graphics.Clear(Color.Purple);
+            overlay.CompleteTranslation(new Bitmap(translated));
+            overlay.ClickConfirmButtonForTesting();
+            Assert.False(overlay.IsDisposed);
+            Assert.True(overlay.HasTranslationResultForTesting);
+            backend.BusyWritesRemaining = 0;
+            overlay.ClickConfirmButtonForTesting();
+            Assert.True(overlay.IsDisposed);
+        });
+        using Image? copied = backend.GetImage();
+        Assert.NotNull(copied);
+        Assert.Equal(Color.Purple.ToArgb(), ((Bitmap)copied).GetPixel(50, 40).ToArgb());
+    }
+
     private static void RunOnUiThread(TestImageClipboard backend, Action<string> notify,
         Action<ScreenshotOverlayForm> verify)
     {

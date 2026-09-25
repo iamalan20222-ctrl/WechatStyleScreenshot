@@ -12,8 +12,8 @@ public sealed class ApiSettingsForm : Form
     private readonly ComboBox _defaultProvider = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly ComboBox _editingProvider = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _status = new() { Dock = DockStyle.Fill, AutoSize = true };
-    private readonly TextBox _key = new() { Dock = DockStyle.Fill, UseSystemPasswordChar = true };
-    private readonly Button _reveal = new() { Text = "显示", Width = 56, Height = 27 };
+    private readonly TextBox _key = new() { Name = "ImageApiKey", Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+    private readonly Button _reveal = new() { Name = "ImageReveal", Text = "显示", Width = 56, Height = 27 };
     private readonly ComboBox _model = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
     private readonly Label _saveFeedback = new() { Dock = DockStyle.Fill, AutoSize = true };
     private readonly ComboBox _region = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -23,6 +23,13 @@ public sealed class ApiSettingsForm : Form
     private readonly Label _workspaceLabel = new() { Text = "Workspace ID", AutoSize = true };
     private readonly Label _baseUrlLabel = new() { Text = "Base URL", AutoSize = true };
     private bool _showingSavedCredentialMask;
+    private readonly TextBox _translationKey = new() { Name = "TranslationApiKey", Dock = DockStyle.Fill, UseSystemPasswordChar = true };
+    private readonly Button _translationReveal = new() { Name = "TranslationReveal", Text = "显示", Width = 56, Height = 27 };
+    private readonly ComboBox _translationModel = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly ComboBox _translationLanguage = new() { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly Label _translationStatus = new() { Dock = DockStyle.Fill };
+    private readonly Label _translationFeedback = new() { Dock = DockStyle.Fill };
+    private bool _translationMask;
 
     public ApiSettingsForm(OutfitSettingsStore store, CredentialStore credentials)
     {
@@ -40,7 +47,14 @@ public sealed class ApiSettingsForm : Form
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         for (int row = 0; row < 10; row++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, row == 2 ? 58 : 38));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        Controls.Add(layout);
+        TabControl tabs = new() { Dock = DockStyle.Fill };
+        TabPage imageTab = new("图像 API");
+        TabPage translationTab = new("翻译 API");
+        imageTab.Controls.Add(layout);
+        tabs.TabPages.Add(imageTab);
+        tabs.TabPages.Add(translationTab);
+        Controls.Add(tabs);
+        BuildTranslationSettings(translationTab);
         AddRow(layout, 0, "默认 AI 服务", _defaultProvider);
         AddRow(layout, 1, "编辑服务商", _editingProvider);
         layout.Controls.Add(_status, 0, 2);
@@ -112,6 +126,102 @@ public sealed class ApiSettingsForm : Form
     {
         layout.Controls.Add(new Label { Text = name, AutoSize = true, Anchor = AnchorStyles.Left }, 0, row);
         layout.Controls.Add(control, 1, row);
+    }
+
+    private void BuildTranslationSettings(TabPage page)
+    {
+        TableLayoutPanel layout = new() { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 7, Padding = new Padding(16) };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 118));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int i = 0; i < 7; i++) layout.RowStyles.Add(new RowStyle(SizeType.Absolute, i == 0 ? 54 : 44));
+        page.Controls.Add(layout);
+        layout.Controls.Add(new Label { Text = "DeepSeek", Dock = DockStyle.Fill, Font = new Font(Font, FontStyle.Bold) }, 0, 0);
+        layout.SetColumnSpan(layout.GetControlFromPosition(0, 0)!, 2);
+        layout.Controls.Add(_translationStatus, 0, 1);
+        layout.SetColumnSpan(_translationStatus, 2);
+        TableLayoutPanel keyRow = new() { Dock = DockStyle.Fill, ColumnCount = 2 };
+        keyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        keyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        keyRow.Controls.Add(_translationKey, 0, 0);
+        keyRow.Controls.Add(_translationReveal, 1, 0);
+        AddRow(layout, 2, "API Key", keyRow);
+        _translationKey.Enter += (_, _) => BeginTranslationKeyEdit();
+        _translationKey.MouseDown += (_, _) => BeginTranslationKeyEdit();
+        _translationKey.KeyDown += (_, _) => BeginTranslationKeyEdit();
+        _translationReveal.Click += (_, _) =>
+        {
+            if (_translationMask) return;
+            _translationKey.UseSystemPasswordChar = !_translationKey.UseSystemPasswordChar;
+            _translationReveal.Text = _translationKey.UseSystemPasswordChar ? "显示" : "隐藏";
+        };
+        _translationModel.Items.AddRange(["deepseek-v4-flash", "deepseek-v4-pro"]);
+        _translationModel.SelectedItem = _translationModel.Items.Contains(_settings.DeepSeekModel) ? _settings.DeepSeekModel : "deepseek-v4-flash";
+        AddRow(layout, 3, "Model", _translationModel);
+        _translationLanguage.Items.AddRange(["简体中文", "English", "日本語", "한국어"]);
+        _translationLanguage.SelectedItem = _translationLanguage.Items.Contains(_settings.TranslationTargetLanguage)
+            ? _settings.TranslationTargetLanguage : "简体中文";
+        AddRow(layout, 4, "目标语言", _translationLanguage);
+        FlowLayoutPanel actions = new() { Dock = DockStyle.Fill };
+        Button save = new() { Text = "保存", Width = 82 };
+        Button delete = new() { Text = "删除 Key", Width = 92 };
+        save.Click += (_, _) => SaveTranslationSettings();
+        delete.Click += (_, _) =>
+        {
+            if (MessageBox.Show(this, "删除 DeepSeek API Key？", "确认删除", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+            try { _credentials.DeleteTranslationCredential(); RefreshTranslationCredentialDisplay(); }
+            catch (Exception) { _translationFeedback.Text = "删除失败，请重试"; }
+        };
+        actions.Controls.Add(save);
+        actions.Controls.Add(delete);
+        layout.Controls.Add(actions, 0, 5);
+        layout.SetColumnSpan(actions, 2);
+        layout.Controls.Add(_translationFeedback, 0, 6);
+        layout.SetColumnSpan(_translationFeedback, 2);
+        RefreshTranslationCredentialDisplay();
+    }
+
+    private void BeginTranslationKeyEdit()
+    {
+        if (!_translationMask) return;
+        _translationMask = false;
+        _translationKey.Clear();
+        _translationReveal.Enabled = true;
+    }
+
+    private void RefreshTranslationCredentialDisplay()
+    {
+        _translationMask = false;
+        _translationKey.Clear();
+        _translationKey.UseSystemPasswordChar = true;
+        _translationReveal.Text = "显示";
+        bool configured = _credentials.HasTranslationCredential();
+        if (configured) { _translationMask = true; _translationKey.Text = SavedCredentialMask; }
+        _translationReveal.Enabled = !configured;
+        _translationStatus.Text = configured ? "DeepSeek：已配置" : "DeepSeek：未配置";
+    }
+
+    internal bool SaveTranslationSettings()
+    {
+        try
+        {
+            OutfitAppSettings settings = _store.Load();
+            settings.DeepSeekModel = (string)_translationModel.SelectedItem!;
+            settings.TranslationTargetLanguage = (string)_translationLanguage.SelectedItem!;
+            if (!_translationMask && !string.IsNullOrWhiteSpace(_translationKey.Text))
+                _credentials.SaveTranslationCredential(_translationKey.Text);
+            _store.Save(settings);
+            _settings = settings;
+            RefreshTranslationCredentialDisplay();
+            _translationFeedback.ForeColor = Color.ForestGreen;
+            _translationFeedback.Text = "✓ 已保存";
+            return true;
+        }
+        catch (Exception)
+        {
+            _translationFeedback.ForeColor = Color.Firebrick;
+            _translationFeedback.Text = "保存失败，请重试";
+            return false;
+        }
     }
 
     private ImageEditProviderKind SelectedProvider => (ImageEditProviderKind)_editingProvider.SelectedIndex;

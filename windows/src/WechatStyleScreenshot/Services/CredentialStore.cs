@@ -5,6 +5,7 @@ namespace WechatStyleScreenshot.Services;
 
 public sealed class CredentialStore
 {
+    private const string TranslationCredential = "DeepSeekTranslation";
     public string FilePath { get; }
 
     public CredentialStore(string? filePath = null) => FilePath = filePath ?? Path.Combine(
@@ -12,25 +13,44 @@ public sealed class CredentialStore
 
     public bool HasCredential(ImageEditProviderKind provider) => !string.IsNullOrWhiteSpace(GetCredential(provider));
 
+    public bool HasTranslationCredential() => !string.IsNullOrWhiteSpace(GetTranslationCredential());
+    public string? GetTranslationCredential() => GetCredentialByName(TranslationCredential);
+    public void SaveTranslationCredential(string key) => SaveCredentialByName(TranslationCredential, key);
+    public void DeleteTranslationCredential() => DeleteCredentialByName(TranslationCredential);
+
     public string? GetCredential(ImageEditProviderKind provider)
     {
-        Dictionary<string, string> values = Read();
-        string? key = values.GetValueOrDefault(provider.ToString());
+        return GetCredentialByName(provider.ToString());
+    }
+
+    private string? GetCredentialByName(string name)
+    {
+        string? key = Read().GetValueOrDefault(name);
         return IsPlaceholder(key) ? null : key;
     }
 
     public void SaveCredential(ImageEditProviderKind provider, string key)
     {
+        SaveCredentialByName(provider.ToString(), key);
+    }
+
+    private void SaveCredentialByName(string name, string key)
+    {
         if (IsPlaceholder(key)) throw new ArgumentException("A real API key is required.", nameof(key));
         Dictionary<string, string> values = Read();
-        values[provider.ToString()] = key.Trim();
+        values[name] = key.Trim();
         Write(values);
     }
 
     public void DeleteCredential(ImageEditProviderKind provider)
     {
+        DeleteCredentialByName(provider.ToString());
+    }
+
+    private void DeleteCredentialByName(string name)
+    {
         Dictionary<string, string> values = Read();
-        values.Remove(provider.ToString());
+        values.Remove(name);
         Write(values);
     }
 
