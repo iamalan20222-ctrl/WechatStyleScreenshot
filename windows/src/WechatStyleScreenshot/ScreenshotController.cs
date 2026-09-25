@@ -69,7 +69,8 @@ public sealed class ScreenshotController
     {
         _isCapturing = true;
         _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection,
-            _settingsStore is null ? null : type => _settingsStore.Load().GetStyle(type).Title);
+            _settingsStore is null ? null : type => _settingsStore.Load().GetStyle(type).Title,
+            _settingsStore is null ? null : () => _settingsStore.Load().GetEnabledStyles());
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
         _overlay.OutfitPreviewStartRequested += TryStartOutfitPreview;
@@ -162,6 +163,8 @@ public sealed class ScreenshotController
         {
             return false;
         }
+
+        if (_settingsStore is not null && !_settingsStore.Load().GetStyle(style).IsEnabled) return false;
 
         if (!_outfitRequestGate.TryAcquire(out CancellationTokenSource cancellation)) return false;
         int requestNumber = ++_outfitRequestSequence;

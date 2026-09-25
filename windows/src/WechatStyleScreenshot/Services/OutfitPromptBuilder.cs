@@ -27,7 +27,8 @@ For an adult model only. Fashion-oriented, professional fitting preview; fully c
         style ??= defaults;
         string title = string.IsNullOrWhiteSpace(style.Title) ? defaults.Title : style.Title.Trim();
         string editablePrompt = string.IsNullOrWhiteSpace(style.Prompt) ? defaults.Prompt : style.Prompt.Trim();
-        bool customPrompt = !string.Equals(editablePrompt, defaults.Prompt, StringComparison.Ordinal);
+        bool customPrompt = !OutfitStyleCatalog.IsBuiltIn(options.Preset) ||
+            !string.Equals(editablePrompt, defaults.Prompt, StringComparison.Ordinal);
         if (customPrompt && title == defaults.Title) title = "Custom clothing direction";
         string variation = !customPrompt
             ? $"Create a tasteful {options.Style} {options.Color} {options.GarmentCategory} outfit. Generate a new, realistic adult fashion editorial design on every request."

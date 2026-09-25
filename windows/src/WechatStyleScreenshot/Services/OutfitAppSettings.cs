@@ -8,6 +8,7 @@ public sealed class StyleSetting
 {
     public string Title { get; set; } = "";
     public string Prompt { get; set; } = "";
+    public bool IsEnabled { get; set; }
 }
 
 public sealed class OutfitAppSettings
@@ -25,15 +26,13 @@ public sealed class OutfitAppSettings
     public StyleSetting GetStyle(OutfitStylePresetType type)
     {
         Styles ??= new();
-        string key = type switch
-        {
-            OutfitStylePresetType.Sport => "A",
-            OutfitStylePresetType.Bikini => "B",
-            OutfitStylePresetType.JK => "C",
-            _ => throw new ArgumentOutOfRangeException(nameof(type))
-        };
+        string key = OutfitStyleCatalog.SlotId(type);
         StyleSetting defaults = OutfitStyleCatalog.GetDefaultSetting(type);
-        if (!Styles.TryGetValue(key, out StyleSetting? current) || current is null) return defaults;
+        if (!Styles.TryGetValue(key, out StyleSetting? current) || current is null)
+        {
+            defaults.IsEnabled = OutfitStyleCatalog.IsBuiltIn(type);
+            return defaults;
+        }
         return new StyleSetting
         {
             Title = string.IsNullOrWhiteSpace(current.Title) ||
@@ -43,12 +42,20 @@ public sealed class OutfitAppSettings
                 (type == OutfitStylePresetType.Bikini &&
                  (current.Prompt.Contains("比基尼", StringComparison.OrdinalIgnoreCase) ||
                   current.Prompt.Contains("bikini", StringComparison.OrdinalIgnoreCase)))
-                ? defaults.Prompt : current.Prompt.Trim()
+                ? defaults.Prompt : current.Prompt.Trim(),
+            IsEnabled = OutfitStyleCatalog.IsBuiltIn(type) || current.IsEnabled
         };
     }
 
-    public void SetStyle(OutfitStylePresetType type, StyleSetting setting) =>
-        (Styles ??= new())[type switch { OutfitStylePresetType.Sport => "A", OutfitStylePresetType.Bikini => "B", _ => "C" }] = setting;
+    public void SetStyle(OutfitStylePresetType type, StyleSetting setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+        setting.IsEnabled = OutfitStyleCatalog.IsBuiltIn(type) || setting.IsEnabled;
+        (Styles ??= new())[OutfitStyleCatalog.SlotId(type)] = setting;
+    }
+
+    public IReadOnlyList<OutfitStylePreset> GetEnabledStyles() =>
+        OutfitStyleCatalog.All.Where(preset => GetStyle(preset.Type).IsEnabled).ToArray();
 
     public void ResetStyle(OutfitStylePresetType type) => SetStyle(type, OutfitStyleCatalog.GetDefaultSetting(type));
 
@@ -79,6 +86,7 @@ public sealed class OutfitSettingsStore
         {
             if (!File.Exists(FilePath)) return new OutfitAppSettings();
             OutfitAppSettings settings = JsonSerializer.Deserialize<OutfitAppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new OutfitAppSettings();
+            LimitStyleSlots(settings);
             if (settings.VolcanoModel != AiOutfitPreviewService.ProModel &&
                 settings.VolcanoModel != AiOutfitPreviewService.DefaultModel)
                 settings.VolcanoModel = AiOutfitPreviewService.DefaultModel;
@@ -93,6 +101,7 @@ public sealed class OutfitSettingsStore
     public void Save(OutfitAppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        LimitStyleSlots(settings);
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         string temp = FilePath + ".tmp";
         try
@@ -104,5 +113,12 @@ public sealed class OutfitSettingsStore
         {
             if (File.Exists(temp)) File.Delete(temp);
         }
+    }
+
+    private static void LimitStyleSlots(OutfitAppSettings settings)
+    {
+        HashSet<string> slots = OutfitStyleCatalog.All.Select(preset => OutfitStyleCatalog.SlotId(preset.Type)).ToHashSet();
+        settings.Styles = (settings.Styles ?? new()).Where(entry => slots.Contains(entry.Key))
+            .ToDictionary(entry => entry.Key, entry => entry.Value);
     }
 }

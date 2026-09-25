@@ -90,17 +90,17 @@ macOS 首次截图时可能需要授权：
 8. 右键、红色叉或 `Esc` 取消
 9. 确认后可直接 `Ctrl + V` 粘贴到微信、PPT、浏览器或文档
 10. 点击工具栏“文”可识别选区文字并复制到剪贴板
-11. 点击“试”先选择 `A 运动风`、`B 比基尼` 或 `C JK穿搭`；选中后在当前选区内生成，可再次选款重试，点击“✓”复制当前结果，生成中可按 `Esc` 取消
+11. 点击“试”先选择款式；A 运动风、B 泳衣、C JK穿搭始终可用，D-H 仅在“提示词设置”中启用后出现。选中后在当前选区内生成，可再次选款重试，点击“✓”复制当前结果，生成中可按 `Esc` 取消
 
 ## AI 穿搭预览
 
-Windows 托盘菜单提供“提示词设置”和“添加 APIKEY”。提示词设置只允许修改 A/B/C 的名称与风格描述；人物身份、选区边界和非裸露规则始终从程序内置常量拼接，无法在设置文件中删除。“查看最终提示词”仅供只读预览。设置保存在 `%LOCALAPPDATA%\WechatStyleScreenshot\settings.json`，损坏或删除后自动回退默认款式。
+Windows 托盘菜单提供“提示词设置”和“添加 APIKEY”。提示词设置提供固定 A-H 共 8 个槽位：A/B/C 可编辑并恢复默认；D-H 默认禁用，可设置名称和提示词后启用，或再次禁用；“全部恢复默认”会禁用 D-H。人物身份、选区边界和非裸露规则始终从程序内置常量拼接，无法在设置文件中删除。“查看最终提示词”仅供只读预览。设置保存在 `%LOCALAPPDATA%\WechatStyleScreenshot\settings.json`，损坏或删除后自动回退默认款式。
 
 API 设置可分别保存火山方舟、Qwen 和 OpenAI 三组密钥，并选择默认服务。密钥通过 Windows 当前用户 DPAPI 加密后写入 `%LOCALAPPDATA%\WechatStyleScreenshot\secrets.dat`，不写入 `settings.json` 或日志。升级时程序会将当前进程可见的旧 `ARK_API_KEY` 导入加密存储一次；之后 GUI 不再依赖环境变量。若旧用户级环境变量仍存在，需由用户自行决定是否移除。连接测试不上传截图，也不收费；实际鉴权在首次生成时验证。
 
-Qwen 默认使用 `qwen-image-3.0-pro`，可切换 `qwen-image-3.0`；配置时必须填写对应 Region 的 Workspace ID，或选择自定义 HTTPS Base URL。OpenAI 默认使用 `gpt-image-2.5-sunburst`，也可选 `gpt-image-2.5-flare` 或 `gpt-image-2`，通过 Image Edit API 发送选区原图与最终提示词。切换默认服务商不会更改 A/B/C 的提示词，也不会悄悄回退至别家服务。
+Qwen 默认使用 `qwen-image-3.0-pro`，可切换 `qwen-image-3.0`；配置时必须填写对应 Region 的 Workspace ID，或选择自定义 HTTPS Base URL。OpenAI 默认使用 `gpt-image-2.5-sunburst`，也可选 `gpt-image-2.5-flare` 或 `gpt-image-2`，通过 Image Edit API 发送选区原图与最终提示词。切换默认服务商不会更改 A-H 的提示词，也不会悄悄回退至别家服务。
 
-Windows 确认工具栏的 `试` 使用所选图像编辑服务。点击后在截图界面内打开三款选择浮层；点击 A/B/C 后才发送请求并在原选区生成，不打开新窗口。点击浮层外可关闭而不发送请求；再次点击“试”仍会重新选款，每次均使用原始截图而非上次生成图。首次使用前在托盘“添加 APIKEY”中保存所选服务商的密钥。旧版火山用户仍可通过下面的环境变量完成一次性加密迁移：
+Windows 确认工具栏的 `试` 使用所选图像编辑服务。点击后在截图界面内打开款式选择浮层；只有选中已启用的 A-H 款式后才发送请求并在原选区生成，不打开新窗口。点击浮层外可关闭而不发送请求；再次点击“试”仍会重新选款，每次均使用原始截图而非上次生成图。首次使用前在托盘“添加 APIKEY”中保存所选服务商的密钥。旧版火山用户仍可通过下面的环境变量完成一次性加密迁移：
 
 ```powershell
 $env:ARK_API_KEY = '<your-new-ark-api-key>'
@@ -125,7 +125,7 @@ Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。m
 
 ## 隐私
 
-OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: clicking “试” opens A/B/C style choices; selecting one uploads the selected region. Use only authorized adult-model images. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
+OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: clicking “试” opens the enabled A-H style choices; selecting one uploads the selected region. Use only authorized adult-model images. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
 
 ## 项目结构
 

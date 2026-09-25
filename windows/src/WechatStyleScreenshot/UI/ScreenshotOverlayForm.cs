@@ -15,13 +15,13 @@ public sealed class ScreenshotOverlayForm : Form
     private const int ToolbarGap = 14;
     private const int ToolbarButtonSize = 30;
     private const int StylePickerWidth = 168;
-    private const int StylePickerHeight = 126;
     private static readonly Color AccentColor = Color.FromArgb(46, 190, 112);
     private static readonly Color CancelColor = Color.FromArgb(232, 89, 89);
 
     private readonly Rectangle _virtualBounds;
     private readonly Bitmap _desktopSnapshot;
     private readonly Func<OutfitStylePresetType, string>? _styleTitleProvider;
+    private readonly Func<IReadOnlyList<OutfitStylePreset>>? _availableStylesProvider;
     private readonly bool _extractTextOnSelection;
     private readonly System.Windows.Forms.Timer _outfitTimer;
     private readonly ToolTip _toolTip = new();
@@ -33,7 +33,8 @@ public sealed class ScreenshotOverlayForm : Form
     private Rectangle _outfitButtonBounds;
     private Rectangle _confirmButtonBounds;
     private Rectangle _stylePickerBounds;
-    private readonly Rectangle[] _styleOptionBounds = new Rectangle[3];
+    private readonly Rectangle[] _styleOptionBounds = new Rectangle[8];
+    private IReadOnlyList<OutfitStylePreset> _visibleStyles = OutfitStyleCatalog.BuiltIn;
     private bool _stylePickerOpen;
     private int _hoveredStyleIndex = -1;
     private OutfitStylePresetType _lastChosenStyle = OutfitStylePresetType.Sport;
@@ -63,7 +64,7 @@ public sealed class ScreenshotOverlayForm : Form
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
     internal bool IsStylePickerOpenForTesting => _stylePickerOpen;
-    internal IReadOnlyList<string> StyleLabelsForTesting => OutfitStyleCatalog.All.Select(style => StyleLabel(style.Type)).ToArray();
+    internal IReadOnlyList<string> StyleLabelsForTesting => (_stylePickerOpen ? _visibleStyles : AvailableStyles()).Select(style => StyleLabel(style.Type)).ToArray();
     internal Bitmap CreateOutfitOriginalImageForTesting() =>
         _outfitSession?.CreateRequestImage() ?? throw new InvalidOperationException("No selection is active.");
 
@@ -89,7 +90,7 @@ public sealed class ScreenshotOverlayForm : Form
     internal bool ClickStyleForTesting(OutfitStylePresetType style)
     {
         if (!_stylePickerOpen) return false;
-        int index = OutfitStyleCatalog.All.ToList().FindIndex(item => item.Type == style);
+        int index = _visibleStyles.ToList().FindIndex(item => item.Type == style);
         if (index < 0) return false;
         Rectangle bounds = _styleOptionBounds[index];
         OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, bounds.Left + bounds.Width / 2,
@@ -108,12 +109,14 @@ public sealed class ScreenshotOverlayForm : Form
     }
 
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false,
-        Func<OutfitStylePresetType, string>? styleTitleProvider = null)
+        Func<OutfitStylePresetType, string>? styleTitleProvider = null,
+        Func<IReadOnlyList<OutfitStylePreset>>? availableStylesProvider = null)
     {
         _virtualBounds = virtualBounds;
         _desktopSnapshot = desktopSnapshot;
         _extractTextOnSelection = extractTextOnSelection;
         _styleTitleProvider = styleTitleProvider;
+        _availableStylesProvider = availableStylesProvider;
         _outfitTimer = new System.Windows.Forms.Timer { Interval = 100 };
         _outfitTimer.Tick += OnOutfitTimerTick;
 
@@ -152,7 +155,7 @@ public sealed class ScreenshotOverlayForm : Form
                 {
                     if (_styleOptionBounds[index].Contains(e.Location))
                     {
-                        SelectOutfitStyle(OutfitStyleCatalog.All[index].Type);
+                        SelectOutfitStyle(_visibleStyles[index].Type);
                         return;
                     }
                 }
@@ -362,6 +365,7 @@ public sealed class ScreenshotOverlayForm : Form
     private void RequestOutfitPreview()
     {
         if (!_hasSelection || !SelectionMath.IsCapturable(_selection) || _outfitSession is null) return;
+        _visibleStyles = AvailableStyles();
         _stylePickerOpen = true;
         _hoveredStyleIndex = -1;
         UpdateStylePickerBounds();
@@ -529,13 +533,15 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void UpdateStylePickerBounds()
     {
+        int height = 12 + _visibleStyles.Count * 38;
         int x = Math.Clamp(_outfitButtonBounds.Left - 69, 8, Math.Max(8, ClientRectangle.Right - StylePickerWidth - 8));
-        int y = _toolbarBounds.Top - StylePickerHeight - 7;
+        int y = _toolbarBounds.Top - height - 7;
         if (y < 8) y = _toolbarBounds.Bottom + 7;
-        y = Math.Clamp(y, 8, Math.Max(8, ClientRectangle.Bottom - StylePickerHeight - 8));
-        _stylePickerBounds = new Rectangle(x, y, StylePickerWidth, StylePickerHeight);
+        y = Math.Clamp(y, 8, Math.Max(8, ClientRectangle.Bottom - height - 8));
+        _stylePickerBounds = new Rectangle(x, y, StylePickerWidth, height);
         for (int index = 0; index < _styleOptionBounds.Length; index++)
-            _styleOptionBounds[index] = new Rectangle(x + 6, y + 6 + index * 38, StylePickerWidth - 12, 36);
+            _styleOptionBounds[index] = index < _visibleStyles.Count
+                ? new Rectangle(x + 6, y + 6 + index * 38, StylePickerWidth - 12, 36) : Rectangle.Empty;
     }
 
     public Bitmap CreateOutfitRequestImage()
@@ -796,9 +802,9 @@ public sealed class ScreenshotOverlayForm : Form
         using Font font = new("Microsoft YaHei UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
         using StringFormat format = new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center,
             Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
-        for (int index = 0; index < OutfitStyleCatalog.All.Count; index++)
+        for (int index = 0; index < _visibleStyles.Count; index++)
         {
-            OutfitStylePreset style = OutfitStyleCatalog.All[index];
+            OutfitStylePreset style = _visibleStyles[index];
             Rectangle row = _styleOptionBounds[index];
             if (index == _hoveredStyleIndex || style.Type == _lastChosenStyle)
             {
@@ -819,6 +825,9 @@ public sealed class ScreenshotOverlayForm : Form
         string title = _styleTitleProvider?.Invoke(type) ?? OutfitStyleCatalog.GetDefaultSetting(type).Title;
         return $"{preset.Label[0]} {title}";
     }
+
+    private IReadOnlyList<OutfitStylePreset> AvailableStyles() =>
+        _availableStylesProvider?.Invoke() ?? OutfitStyleCatalog.BuiltIn;
 
     private void DrawButtonHover(Graphics graphics, Rectangle buttonBounds, ToolbarButtonHit button)
     {
