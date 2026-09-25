@@ -16,6 +16,12 @@ internal static class Program
             return OutfitSmokeTest.RunAsync(args[1]).GetAwaiter().GetResult();
         }
 
+        if (args.Length == 3 && args[0].Equals("--outfit-smoke-test", StringComparison.OrdinalIgnoreCase) &&
+            args[2].Equals("B", StringComparison.OrdinalIgnoreCase))
+        {
+            return OutfitSmokeTest.RunAsync(args[1], OutfitStylePresetType.Bikini, 1).GetAwaiter().GetResult();
+        }
+
         if (args.Length == 2 && args[0].Equals("--outfit-ui-smoke-test", StringComparison.OrdinalIgnoreCase))
         {
             return OutfitUiSmokeTest.Run(args[1]);

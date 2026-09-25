@@ -69,14 +69,17 @@ public class OutfitPromptBuilderTests
     public void BikiniDefaultUsesAdultCommercialSwimwearPrompt()
     {
         StyleSetting style = OutfitStyleCatalog.GetDefaultSetting(OutfitStylePresetType.Bikini);
-        Assert.Equal("比基尼", style.Title);
-        Assert.StartsWith("请将服装替换为一套适合设计参考的成人商业泳装。", style.Prompt);
+        Assert.Equal("泳衣", style.Title);
+        Assert.StartsWith("请将服装替换为一套适合设计参考的成人商业泳衣。", style.Prompt);
         Assert.Contains("同一个成年女性模特，在同一场景和同一拍摄瞬间", style.Prompt);
         Assert.Contains("不透明", style.Prompt);
         Assert.Contains("非情色", style.Prompt);
         string prompt = OutfitPromptBuilder.Build(new OutfitPreviewOptions(OutfitStylePresetType.Bikini));
         Assert.Contains(style.Prompt, prompt);
         Assert.Contains("source screenshot is the only identity reference", prompt);
+        Assert.DoesNotContain("比基尼", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("bikini", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("B 泳衣", OutfitStyleCatalog.Get(OutfitStylePresetType.Bikini).Label);
     }
 
     [Fact]
@@ -94,7 +97,7 @@ public class OutfitPromptBuilderTests
     [Fact]
     public void RandomStyleDirectionsStayWithinTheGarmentReferenceFamilies()
     {
-        Assert.Equal(4, OutfitStyleCatalog.Get(OutfitStylePresetType.Bikini).Directions.Length);
+        Assert.Equal(5, OutfitStyleCatalog.Get(OutfitStylePresetType.Bikini).Directions.Length);
         Assert.Equal(4, OutfitStyleCatalog.Get(OutfitStylePresetType.JK).Directions.Length);
         Assert.DoesNotContain(OutfitStyleCatalog.Get(OutfitStylePresetType.Bikini).Directions,
             direction => direction.Contains("cut-out", StringComparison.OrdinalIgnoreCase) ||

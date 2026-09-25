@@ -181,6 +181,7 @@ public class AiOutfitPreviewServiceTests
 
     [Theory]
     [InlineData(HttpStatusCode.Forbidden, "ContentPolicyViolation", OutfitPreviewStatus.SafetyRejected)]
+    [InlineData(HttpStatusCode.BadRequest, "ContentPolicyViolation", OutfitPreviewStatus.SafetyRejected)]
     [InlineData(HttpStatusCode.BadRequest, "InvalidParameter", OutfitPreviewStatus.InvalidRequest)]
     [InlineData(HttpStatusCode.PaymentRequired, "QuotaExceeded", OutfitPreviewStatus.QuotaExceeded)]
     [InlineData(HttpStatusCode.ServiceUnavailable, "ServerOverloaded", OutfitPreviewStatus.ServerError)]

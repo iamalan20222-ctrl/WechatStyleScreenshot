@@ -7,7 +7,8 @@ namespace WechatStyleScreenshot.Services;
 
 internal static class OutfitSmokeTest
 {
-    public static async Task<int> RunAsync(string imagePath)
+    public static async Task<int> RunAsync(string imagePath, OutfitStylePresetType preset = OutfitStylePresetType.Sport,
+        int requestCount = 3)
     {
         if (!File.Exists(imagePath))
         {
@@ -22,7 +23,8 @@ internal static class OutfitSmokeTest
             return 3;
         }
 
-        string outputDirectory = Path.Combine(Path.GetDirectoryName(imagePath)!, "results");
+        string outputDirectory = Path.Combine(Path.GetDirectoryName(imagePath)!,
+            preset == OutfitStylePresetType.Bikini ? "results-swimwear" : "results");
         Directory.CreateDirectory(outputDirectory);
         string reportPath = Path.Combine(outputDirectory, "smoke-test-report.txt");
         using StreamWriter report = new(reportPath, append: false, encoding: new UTF8Encoding(false));
@@ -35,12 +37,12 @@ internal static class OutfitSmokeTest
         WriteLine($"TEST_IMAGE_SIZE: {original.Width}x{original.Height}");
         WriteLine("PROVIDER_SMOKE_TEST: START");
 
-        for (int requestNumber = 1; requestNumber <= 3; requestNumber++)
+        for (int requestNumber = 1; requestNumber <= requestCount; requestNumber++)
         {
             using CancellationTokenSource requestCancellation = new(TimeSpan.FromMinutes(10));
             DateTimeOffset startedAt = DateTimeOffset.Now;
             Stopwatch stopwatch = Stopwatch.StartNew();
-            OutfitPreviewResult result = await service.GenerateAsync(original, new OutfitPreviewOptions(), requestCancellation.Token);
+            OutfitPreviewResult result = await service.GenerateAsync(original, new OutfitPreviewOptions(preset), requestCancellation.Token);
             stopwatch.Stop();
             DateTimeOffset endedAt = DateTimeOffset.Now;
             bool receivedImage = result.Status == OutfitPreviewStatus.Success && result.Image is not null;

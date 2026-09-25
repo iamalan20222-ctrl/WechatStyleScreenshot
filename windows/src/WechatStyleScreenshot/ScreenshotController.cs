@@ -239,10 +239,10 @@ public sealed class ScreenshotController
                 return;
             }
 
-            string message = BuildOutfitErrorMessage(result);
+            string message = BuildOutfitErrorMessage(result, style);
             ReleaseRequest();
             overlay.ShowOutfitError(message);
-            if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify(BuildOutfitErrorMessage(result));
+            if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify(BuildOutfitErrorMessage(result, style));
             else if (result.HttpStatusCode is not null)
                 _notify(BuildOutfitDiagnostic(result));
         }
@@ -282,7 +282,7 @@ public sealed class ScreenshotController
         _outfitRequestGate.CancelActive();
     }
 
-    private static string BuildOutfitErrorMessage(OutfitPreviewResult result)
+    internal static string BuildOutfitErrorMessage(OutfitPreviewResult result, OutfitStylePresetType style)
     {
         string message = result.Status switch
         {
@@ -297,7 +297,9 @@ public sealed class ScreenshotController
             OutfitPreviewStatus.RateLimited => "请求过于频繁，请稍后重试",
             OutfitPreviewStatus.TimedOut => "生成超时，请重试",
             OutfitPreviewStatus.NetworkError => "网络连接失败",
-            OutfitPreviewStatus.SafetyRejected => "请求未通过内容安全审核",
+            OutfitPreviewStatus.SafetyRejected => style == OutfitStylePresetType.Bikini
+                ? "当前泳衣提示词未通过内容安全审核，请调整后重试"
+                : "请求未通过内容安全审核",
             OutfitPreviewStatus.QuotaExceeded => "接口额度不足",
             OutfitPreviewStatus.InvalidRequest => "请求参数无效",
             OutfitPreviewStatus.ServerError => "AI 服务暂时不可用",

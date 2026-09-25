@@ -15,32 +15,32 @@ public static class OutfitStyleCatalog
         },
         OutfitStylePresetType.Bikini => new StyleSetting
         {
-            Title = "比基尼",
+            Title = "泳衣",
             Prompt = """
-请将服装替换为一套适合设计参考的成人商业泳装。
+请将服装替换为一套适合设计参考的成人商业泳衣。
 
 要求：
 - 只替换衣物
 - 保持人物身份、脸部、发型、肤色、身材比例、姿势、动作、背景、光线和构图不变
 - 风格为真实、自然、专业的商业泳装摄影效果
 - 服装必须真实可穿着，结构合理，面料自然，细节清晰
-- 必须是正常完整覆盖的成人泳装
+- 必须是正常完整覆盖的成人泳衣
 - 不透明
 - 不露点
 - 不暴露私密部位
 - 非情色
 - 非挑逗
-- 适合作为泳装设计参考
+- 适合作为泳衣设计参考
 
 可随机生成不同方向，例如：
-- 极简高级泳装
-- 运动感泳装
-- 度假风泳装
-- 复古泳装
-- 时装感泳装
+- 极简高级泳衣
+- 运动感泳衣
+- 度假风泳衣
+- 复古泳衣
+- 时装感泳衣
 
 最终效果应为：
-同一个成年女性模特，在同一场景和同一拍摄瞬间，仅将原有服装自然替换为一套高质量、真实、专业的成人商业泳装。
+同一个成年女性模特，在同一场景和同一拍摄瞬间，仅将原有服装自然替换为一套高质量、真实、专业的成人商业泳衣。
 """
         },
         OutfitStylePresetType.JK => new StyleSetting
@@ -55,8 +55,8 @@ public static class OutfitStyleCatalog
     [
         new(OutfitStylePresetType.Sport, "A 运动风", "sports bra and functional innerwear",
             ["sporty minimal", "technical athleisure", "seamless performance", "fashion athletic"]),
-        new(OutfitStylePresetType.Bikini, "B 比基尼", "bikini / swimwear",
-            ["secure gathered bandeau with center ruching", "muted textured triangle swimwear with proper coverage", "solid-color halter with modest neckline", "opaque asymmetric swimwear with restrained ring detail"]),
+        new(OutfitStylePresetType.Bikini, "B 泳衣", "adult commercial swimwear",
+            ["minimal premium swimwear", "functional sports swimwear", "resort swimwear", "retro swimwear", "fashion-oriented commercial swimwear"]),
         new(OutfitStylePresetType.JK, "C JK穿搭", "adult JK-inspired outfit",
             ["taupe collared top with contrast piping and coordinated plaid pleats", "navy sailor collar and bow with pleated skirt", "dark tailored jacket with muted tartan pleats", "navy cardigan and blue-gray plaid with ribbon tie"])
     ];

@@ -36,8 +36,14 @@ public sealed class OutfitAppSettings
         if (!Styles.TryGetValue(key, out StyleSetting? current) || current is null) return defaults;
         return new StyleSetting
         {
-            Title = string.IsNullOrWhiteSpace(current.Title) ? defaults.Title : current.Title.Trim(),
-            Prompt = string.IsNullOrWhiteSpace(current.Prompt) ? defaults.Prompt : current.Prompt.Trim()
+            Title = string.IsNullOrWhiteSpace(current.Title) ||
+                (type == OutfitStylePresetType.Bikini && current.Title.Trim() == "比基尼")
+                ? defaults.Title : current.Title.Trim(),
+            Prompt = string.IsNullOrWhiteSpace(current.Prompt) ||
+                (type == OutfitStylePresetType.Bikini &&
+                 (current.Prompt.Contains("比基尼", StringComparison.OrdinalIgnoreCase) ||
+                  current.Prompt.Contains("bikini", StringComparison.OrdinalIgnoreCase)))
+                ? defaults.Prompt : current.Prompt.Trim()
         };
     }
 

@@ -35,19 +35,52 @@ public class OutfitSettingsTests
     {
         string path = TempFile("settings.json");
         OutfitSettingsStore store = new(path);
-        Assert.Equal("比基尼", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Equal("泳衣", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "{broken");
-        Assert.Equal("比基尼", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Equal("泳衣", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
         OutfitAppSettings settings = new() { DefaultProvider = ImageEditProviderKind.OpenAI };
         settings.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "泳装", Prompt = "新设计" });
         store.Save(settings);
         Assert.Equal("泳装", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
         settings.ResetStyle(OutfitStylePresetType.Bikini);
         store.Save(settings);
-        Assert.Equal("比基尼", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Equal("泳衣", store.Load().GetStyle(OutfitStylePresetType.Bikini).Title);
         Assert.Equal(ImageEditProviderKind.OpenAI, store.Load().DefaultProvider);
-        Assert.Contains("成人商业泳装", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
+        Assert.Contains("成人商业泳衣", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
+    }
+
+    [Fact]
+    public void LegacyDefaultBTitleMigratesWithoutChangingCustomPromptOrCustomTitle()
+    {
+        OutfitAppSettings settings = new();
+        settings.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "比基尼", Prompt = "user-edited swimwear prompt" });
+        Assert.Equal("泳衣", settings.GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Equal("user-edited swimwear prompt", settings.GetStyle(OutfitStylePresetType.Bikini).Prompt);
+        settings.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "我的泳装", Prompt = "custom" });
+        Assert.Equal("我的泳装", settings.GetStyle(OutfitStylePresetType.Bikini).Title);
+        settings.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "我的泳装", Prompt = "custom bikini design" });
+        Assert.Equal("我的泳装", settings.GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Equal(OutfitStyleCatalog.GetDefaultSetting(OutfitStylePresetType.Bikini).Prompt,
+            settings.GetStyle(OutfitStylePresetType.Bikini).Prompt);
+        settings.ResetStyle(OutfitStylePresetType.Bikini);
+        Assert.Equal("泳衣", settings.GetStyle(OutfitStylePresetType.Bikini).Title);
+        Assert.Contains("成人商业泳衣", settings.GetStyle(OutfitStylePresetType.Bikini).Prompt);
+        settings.ResetAllStyles();
+        Assert.Equal("泳衣", settings.GetStyle(OutfitStylePresetType.Bikini).Title);
+    }
+
+    [Fact]
+    public void SafetyRejectionNamesSwimwearAndKeepsSafeDiagnostics()
+    {
+        OutfitPreviewResult result = new(OutfitPreviewStatus.SafetyRejected,
+            HttpStatusCode: 400, ProviderCode: "ContentPolicyViolation", RequestId: "request-test-123");
+        string message = ScreenshotController.BuildOutfitErrorMessage(result, OutfitStylePresetType.Bikini);
+        Assert.Contains("当前泳衣提示词未通过内容安全审核，请调整后重试", message);
+        Assert.Contains("HTTP 400", message);
+        Assert.Contains("ContentPolicyViolation", message);
+        Assert.Contains("request-test-123", message);
+        Assert.DoesNotContain("当前泳衣", ScreenshotController.BuildOutfitErrorMessage(result, OutfitStylePresetType.Sport));
     }
 
     [Fact]
@@ -66,7 +99,7 @@ public class OutfitSettingsTests
                 Assert.True(File.Exists(path));
                 Assert.True(form.ResetStyleAndSaveForTesting(OutfitStylePresetType.Bikini));
                 Assert.Equal("✓ 已恢复并保存", form.SaveFeedbackForTesting);
-                Assert.Contains("成人商业泳装", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
+                Assert.Contains("成人商业泳衣", store.Load().GetStyle(OutfitStylePresetType.Bikini).Prompt);
                 Assert.True(form.ResetAllAndSaveForTesting());
                 Assert.Equal("✓ 已全部恢复并保存", form.SaveFeedbackForTesting);
                 form.SetTitleForTesting(OutfitStylePresetType.Sport, " ");
@@ -192,7 +225,7 @@ public class OutfitSettingsTests
         credentials.SaveCredential(ImageEditProviderKind.OpenAI, "test-openai-key");
         OutfitAppSettings state = settings.Load();
         state.DefaultProvider = ImageEditProviderKind.OpenAI;
-        state.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "泳装设计", Prompt = "Blue geometric bikini" });
+        state.SetStyle(OutfitStylePresetType.Bikini, new StyleSetting { Title = "泳装设计", Prompt = "Blue geometric swimwear" });
         settings.Save(state);
         string? requestBody = null;
         using HttpClient client = new(new StubHandler(async (request, _) =>
@@ -210,7 +243,7 @@ public class OutfitSettingsTests
         using JsonDocument body = JsonDocument.Parse(requestBody!);
         Assert.StartsWith("data:image/png;base64,", body.RootElement.GetProperty("images")[0].GetProperty("image_url").GetString());
         Assert.Equal("high", body.RootElement.GetProperty("input_fidelity").GetString());
-        Assert.Contains("Blue geometric bikini", body.RootElement.GetProperty("prompt").GetString());
+        Assert.Contains("Blue geometric swimwear", body.RootElement.GetProperty("prompt").GetString());
         Assert.Contains(OutfitPromptBuilder.LockedCommonPrompt, body.RootElement.GetProperty("prompt").GetString());
     }
 

@@ -218,7 +218,7 @@ public class OutfitUiFlowTests
                     {
                         overlay.SetSelectionForTesting(new Rectangle(10, 10, 300, 400));
                         Assert.True(overlay.ClickOutfitButtonForTesting());
-                        Assert.Equal(new[] { "A 运动风", "B 比基尼", "C JK穿搭" }, overlay.StyleLabelsForTesting);
+                        Assert.Equal(new[] { "A 运动风", "B 泳衣", "C JK穿搭" }, overlay.StyleLabelsForTesting);
                         Assert.Equal(OutfitPreviewState.None, overlay.OutfitStateForTesting);
                         overlay.ClickOutsideStylePickerForTesting();
                         Assert.False(overlay.IsStylePickerOpenForTesting);
