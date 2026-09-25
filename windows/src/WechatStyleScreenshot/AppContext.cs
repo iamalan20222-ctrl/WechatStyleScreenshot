@@ -67,7 +67,6 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         ContextMenuStrip menu = new();
         menu.Items.Add("Alt + A 截图", null, (_, _) => _screenshotController.BeginCapture());
-        menu.Items.Add("Alt + Shift + A 提取文字", null, (_, _) => _screenshotController.BeginCapture(extractTextOnSelection: true));
         menu.Items.Add(startupItem);
         menu.Items.Add("提示词设置", null, (_, _) =>
         {
