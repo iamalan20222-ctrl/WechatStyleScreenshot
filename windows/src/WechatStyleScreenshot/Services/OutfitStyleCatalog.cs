@@ -11,9 +11,9 @@ public static class OutfitStyleCatalog
         new(OutfitStylePresetType.Sport, "A 运动风", "sports bra and functional innerwear",
             ["sporty minimal", "technical athleisure", "seamless performance", "fashion athletic"]),
         new(OutfitStylePresetType.Bikini, "B 比基尼", "bikini / swimwear",
-            ["minimal luxury", "lace-detail", "cut-out design", "sporty", "thin-strap", "vacation resort", "runway-inspired", "retro", "futuristic", "soft lightweight fully covered"]),
+            ["secure gathered bandeau with center ruching", "muted textured triangle swimwear with proper coverage", "solid-color halter with modest neckline", "opaque asymmetric swimwear with restrained ring detail"]),
         new(OutfitStylePresetType.JK, "C JK穿搭", "adult JK-inspired outfit",
-            ["classic academy", "fresh Japanese soft", "dark-tone uniform", "sweet-cool", "retro campus", "urban fashion"])
+            ["taupe collared top with contrast piping and coordinated plaid pleats", "navy sailor collar and bow with pleated skirt", "dark tailored jacket with muted tartan pleats", "navy cardigan and blue-gray plaid with ribbon tie"])
     ];
 
     public static OutfitStylePreset Get(OutfitStylePresetType type) =>
