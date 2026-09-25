@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using WechatStyleScreenshot.Core;
 using WechatStyleScreenshot.Services;
 using WechatStyleScreenshot.UI;
@@ -120,22 +121,29 @@ public sealed class ScreenshotController
 
     private void OnSelectionCompleted(object? sender, Rectangle selection)
     {
-        if (!SelectionMath.IsCapturable(selection))
-        {
-            ResetOverlay();
-            return;
-        }
+        if (!SelectionMath.IsCapturable(selection) || sender is not ScreenshotOverlayForm overlay) return;
 
         try
         {
-            Application.DoEvents();
-            using Bitmap? outfitResult = (sender as ScreenshotOverlayForm)?.CreateOutfitResultImage();
-            using Bitmap bitmap = outfitResult ?? _captureEngine.Capture(selection);
-            _clipboardManager.SetImage(bitmap);
-        }
-        finally
-        {
+            Bitmap? outfitResult = overlay.CreateOutfitResultImage();
+            using Bitmap bitmap = outfitResult ?? overlay.CreateOriginalSelectionImage();
+            Trace.WriteLine($"[Clipboard] CONFIRM_CLICKED HAS_OUTFIT_RESULT={outfitResult is not null} IMAGE_WIDTH={bitmap.Width} IMAGE_HEIGHT={bitmap.Height} PIXEL_FORMAT={bitmap.PixelFormat} CLIPBOARD_THREAD_APARTMENT={Thread.CurrentThread.GetApartmentState()}");
+            if (!_clipboardManager.TrySetImage(bitmap))
+            {
+                overlay.ShowOutfitNotice("复制失败，请再试一次", TimeSpan.FromSeconds(3));
+                _notify("剪贴板被其他程序占用，请再次点击 ✓");
+                return;
+            }
+
+            _notify(outfitResult is null ? "截图已复制" : "AI 图片已复制到剪贴板");
             ResetOverlay();
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"[Clipboard] CLIPBOARD_WRITE_RESULT=FAIL Exception={ex.GetType().Name} HRESULT=0x{ex.HResult:X8}");
+            if (!overlay.IsDisposed && !overlay.Disposing)
+                overlay.ShowOutfitNotice("复制失败，请再试一次", TimeSpan.FromSeconds(3));
+            _notify("复制失败，请再次点击 ✓");
         }
     }
 

@@ -5,7 +5,7 @@ namespace WechatStyleScreenshot;
 internal static class Program
 {
     [STAThread]
-    private static async Task<int> Main(string[] args)
+    private static int Main(string[] args)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
@@ -13,12 +13,17 @@ internal static class Program
 
         if (args.Length == 2 && args[0].Equals("--outfit-smoke-test", StringComparison.OrdinalIgnoreCase))
         {
-            return await OutfitSmokeTest.RunAsync(args[1]);
+            return OutfitSmokeTest.RunAsync(args[1]).GetAwaiter().GetResult();
         }
 
         if (args.Length == 2 && args[0].Equals("--outfit-ui-smoke-test", StringComparison.OrdinalIgnoreCase))
         {
             return OutfitUiSmokeTest.Run(args[1]);
+        }
+
+        if (args.Length == 1 && args[0].Equals("--clipboard-smoke-test", StringComparison.OrdinalIgnoreCase))
+        {
+            return ClipboardSmokeTest.Run();
         }
 
         StartupManager startupManager = StartupManager.CreateDefault();

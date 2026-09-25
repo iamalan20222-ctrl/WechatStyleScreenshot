@@ -76,6 +76,13 @@ public sealed class ScreenshotOverlayForm : Form
         return OutfitStateForTesting == OutfitPreviewState.Preparing;
     }
 
+    internal void ClickConfirmButtonForTesting()
+    {
+        Point center = new(_confirmButtonBounds.Left + _confirmButtonBounds.Width / 2,
+            _confirmButtonBounds.Top + _confirmButtonBounds.Height / 2);
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+    }
+
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false)
     {
         _virtualBounds = virtualBounds;
@@ -277,7 +284,6 @@ public sealed class ScreenshotOverlayForm : Form
             _selection.Width,
             _selection.Height);
 
-        Hide();
         SelectionCompleted?.Invoke(this, screenSelection);
     }
 
@@ -525,7 +531,18 @@ public sealed class ScreenshotOverlayForm : Form
 
     public Bitmap? CreateOutfitResultImage()
     {
-        return _outfitSession?.HasResult == true ? _outfitSession.CreateConfirmationImage() : null;
+        if (!_hasSelection || _outfitSession?.ResultImage is not Bitmap result) return null;
+        Bitmap finalImage = new(_selection.Width, _selection.Height, PixelFormat.Format32bppArgb);
+        using Graphics graphics = Graphics.FromImage(finalImage);
+        DrawImageCover(graphics, result, new Rectangle(Point.Empty, _selection.Size));
+        return finalImage;
+    }
+
+    internal Bitmap CreateOriginalSelectionImage()
+    {
+        if (!_hasSelection || !SelectionMath.IsCapturable(_selection))
+            throw new InvalidOperationException("No screenshot selection is active.");
+        return _desktopSnapshot.Clone(_selection, PixelFormat.Format32bppArgb);
     }
 
     private void RequestOutfitCancellation()
