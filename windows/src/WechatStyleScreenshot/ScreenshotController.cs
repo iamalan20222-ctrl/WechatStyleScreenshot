@@ -13,8 +13,9 @@ public sealed class ScreenshotController
     private readonly ScreenCaptureEngine _captureEngine;
     private readonly ClipboardManager _clipboardManager;
     private readonly OcrService _ocrService;
-    private readonly AiOutfitPreviewService _outfitPreviewService;
+    private readonly IOutfitGenerationService _outfitPreviewService;
     private readonly Action<string> _notify;
+    private readonly OutfitSettingsStore? _settingsStore;
     private ScreenshotOverlayForm? _overlay;
     private readonly OutfitPreviewRequestGate _outfitRequestGate = new();
     private bool _isCapturing;
@@ -31,13 +32,14 @@ public sealed class ScreenshotController
         ClipboardManager clipboardManager,
         OcrService ocrService,
         Action<string> notify,
-        AiOutfitPreviewService? outfitPreviewService = null)
+        IOutfitGenerationService? outfitPreviewService = null, OutfitSettingsStore? settingsStore = null)
     {
         _captureEngine = captureEngine;
         _clipboardManager = clipboardManager;
         _ocrService = ocrService;
         _outfitPreviewService = outfitPreviewService ?? new AiOutfitPreviewService();
         _notify = notify;
+        _settingsStore = settingsStore;
     }
 
     public void BeginCapture(bool extractTextOnSelection = false)
@@ -66,7 +68,8 @@ public sealed class ScreenshotController
     private ScreenshotOverlayForm CreateOverlay(Rectangle virtualScreenBounds, Bitmap desktopSnapshot, bool extractTextOnSelection)
     {
         _isCapturing = true;
-        _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
+        _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection,
+            _settingsStore is null ? null : type => _settingsStore.Load().GetStyle(type).Title);
         _overlay.SelectionCompleted += OnSelectionCompleted;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
         _overlay.OutfitPreviewStartRequested += TryStartOutfitPreview;
@@ -239,7 +242,7 @@ public sealed class ScreenshotController
             string message = BuildOutfitErrorMessage(result);
             ReleaseRequest();
             overlay.ShowOutfitError(message);
-            if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify("未配置 ARK_API_KEY");
+            if (result.Status == OutfitPreviewStatus.ApiKeyMissing) _notify(BuildOutfitErrorMessage(result));
             else if (result.HttpStatusCode is not null)
                 _notify(BuildOutfitDiagnostic(result));
         }
@@ -283,7 +286,14 @@ public sealed class ScreenshotController
     {
         string message = result.Status switch
         {
-            OutfitPreviewStatus.ApiKeyMissing => "未配置 AI 接口",
+            OutfitPreviewStatus.ApiKeyMissing => result.ProviderCode switch
+            {
+                "OpenAI" => "尚未配置 OpenAI API Key",
+                "Qwen" => "尚未配置 Qwen API Key",
+                "Volcano" => "尚未配置火山方舟 API Key",
+                _ => "未配置 AI 接口"
+            },
+            OutfitPreviewStatus.Unauthorized => "API Key 无效或没有权限",
             OutfitPreviewStatus.RateLimited => "请求过于频繁，请稍后重试",
             OutfitPreviewStatus.TimedOut => "生成超时，请重试",
             OutfitPreviewStatus.NetworkError => "网络连接失败",

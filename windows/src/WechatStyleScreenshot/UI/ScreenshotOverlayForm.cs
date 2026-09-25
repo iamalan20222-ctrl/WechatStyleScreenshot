@@ -21,6 +21,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     private readonly Rectangle _virtualBounds;
     private readonly Bitmap _desktopSnapshot;
+    private readonly Func<OutfitStylePresetType, string>? _styleTitleProvider;
     private readonly bool _extractTextOnSelection;
     private readonly System.Windows.Forms.Timer _outfitTimer;
     private readonly ToolTip _toolTip = new();
@@ -62,7 +63,7 @@ public sealed class ScreenshotOverlayForm : Form
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
     internal bool IsStylePickerOpenForTesting => _stylePickerOpen;
-    internal IReadOnlyList<string> StyleLabelsForTesting => OutfitStyleCatalog.All.Select(style => style.Label).ToArray();
+    internal IReadOnlyList<string> StyleLabelsForTesting => OutfitStyleCatalog.All.Select(style => StyleLabel(style.Type)).ToArray();
     internal Bitmap CreateOutfitOriginalImageForTesting() =>
         _outfitSession?.CreateRequestImage() ?? throw new InvalidOperationException("No selection is active.");
 
@@ -106,11 +107,13 @@ public sealed class ScreenshotOverlayForm : Form
         OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
     }
 
-    public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false)
+    public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false,
+        Func<OutfitStylePresetType, string>? styleTitleProvider = null)
     {
         _virtualBounds = virtualBounds;
         _desktopSnapshot = desktopSnapshot;
         _extractTextOnSelection = extractTextOnSelection;
+        _styleTitleProvider = styleTitleProvider;
         _outfitTimer = new System.Windows.Forms.Timer { Interval = 100 };
         _outfitTimer.Tick += OnOutfitTimerTick;
 
@@ -791,7 +794,8 @@ public sealed class ScreenshotOverlayForm : Form
         using SolidBrush background = new(Color.FromArgb(244, 32, 32, 36));
         graphics.FillPath(background, panel);
         using Font font = new("Microsoft YaHei UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
-        using StringFormat format = new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center };
+        using StringFormat format = new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center,
+            Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
         for (int index = 0; index < OutfitStyleCatalog.All.Count; index++)
         {
             OutfitStylePreset style = OutfitStyleCatalog.All[index];
@@ -804,9 +808,16 @@ public sealed class ScreenshotOverlayForm : Form
                 graphics.FillPath(highlight, rowPath);
             }
             using SolidBrush text = new(Color.WhiteSmoke);
-            graphics.DrawString(style.Label, font, text,
+            graphics.DrawString(StyleLabel(style.Type), font, text,
                 new Rectangle(row.Left + 12, row.Top, row.Width - 20, row.Height), format);
         }
+    }
+
+    private string StyleLabel(OutfitStylePresetType type)
+    {
+        OutfitStylePreset preset = OutfitStyleCatalog.Get(type);
+        string title = _styleTitleProvider?.Invoke(type) ?? OutfitStyleCatalog.GetDefaultSetting(type).Title;
+        return $"{preset.Label[0]} {title}";
     }
 
     private void DrawButtonHover(Graphics graphics, Rectangle buttonBounds, ToolbarButtonHit button)

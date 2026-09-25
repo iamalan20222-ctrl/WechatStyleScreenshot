@@ -12,6 +12,7 @@ public enum OutfitPreviewStatus
 {
     Success,
     ApiKeyMissing,
+    Unauthorized,
     RateLimited,
     TimedOut,
     NetworkError,
@@ -41,7 +42,7 @@ public sealed record OutfitPreviewAttempt(
     int? RetryAfterSeconds,
     string? SafeMessage);
 
-public sealed class AiOutfitPreviewService : IDisposable
+public sealed class AiOutfitPreviewService : IImageEditProvider, IOutfitGenerationService
 {
     private const int MaxErrorBodyBytes = 8 * 1024;
     private const string Endpoint = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
@@ -61,10 +62,18 @@ public sealed class AiOutfitPreviewService : IDisposable
         _delayAsync = delayAsync ?? ((delay, token) => Task.Delay(delay, token));
     }
 
-    public async Task<OutfitPreviewResult> GenerateAsync(Bitmap source, OutfitPreviewOptions options,
+    public Task<OutfitPreviewResult> GenerateAsync(Bitmap source, OutfitPreviewOptions options,
+        CancellationToken cancellationToken = default, Action<TimeSpan, OutfitPreviewStatus>? retryScheduled = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return EditAsync(source, OutfitPromptBuilder.Build(options), cancellationToken, retryScheduled);
+    }
+
+    public async Task<OutfitPreviewResult> EditAsync(Bitmap source, string prompt,
         CancellationToken cancellationToken = default, Action<TimeSpan, OutfitPreviewStatus>? retryScheduled = null)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(prompt);
         if (string.IsNullOrWhiteSpace(_apiKey)) return new(OutfitPreviewStatus.ApiKeyMissing);
 
         List<OutfitPreviewAttempt> attempts = [];
@@ -74,7 +83,6 @@ public sealed class AiOutfitPreviewService : IDisposable
             string? imageDataUri = await Task.Run(() => CreateImageDataUri(source), cancellationToken).ConfigureAwait(false);
             if (imageDataUri is null) return new(OutfitPreviewStatus.Failed);
 
-            string prompt = OutfitPromptBuilder.Build(options);
             for (attemptNumber = 1; attemptNumber <= 3; attemptNumber++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -258,6 +266,7 @@ public sealed class AiOutfitPreviewService : IDisposable
             return OutfitPreviewStatus.QuotaExceeded;
         if (ContainsAny(details, "safety", "moderation", "contentpolicy", "content_policy", "sensitivecontent", "sensitive_content"))
             return OutfitPreviewStatus.SafetyRejected;
+        if (statusCode is 401 or 403) return OutfitPreviewStatus.Unauthorized;
         if (ContainsAny(details, "invalidparameter", "invalid_parameter", "invalidrequest", "invalid_request", "badrequest", "bad_request"))
             return OutfitPreviewStatus.InvalidRequest;
         if (statusCode >= 500 || ContainsAny(details, "serveroverloaded", "server_overloaded"))

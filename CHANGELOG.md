@@ -4,6 +4,8 @@
 
 ### Added
 
+- Windows 托盘新增 A/B/C 提示词设置与三家服务商的 API 设置；通用身份/安全约束锁定在代码中，密钥用当前用户 DPAPI 加密保存
+- 新增 Qwen Image 3.0 与 OpenAI Image Edit 适配，默认服务商可切换；原火山方舟实现保持可用
 - B/C 款改为结构化服装提示词，按服装特征提炼参考图，并为所有款式统一加入选区边界、人物身份、场景连续性与非裸露约束
 - Windows “试”按钮新增内嵌款式选择：A 运动风、B 比基尼、C 成人 JK-inspired 穿搭；选款后才生成，再次生成仍使用原图
 - Windows 新增 `--outfit-ui-smoke-test`，可用指定图片自动走三次 Overlay/Controller 试衣流程并记录门控、状态及原图哈希
