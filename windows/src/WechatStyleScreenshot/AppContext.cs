@@ -11,6 +11,7 @@ public sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly OutfitSettingsStore _outfitSettings = new();
     private readonly CredentialStore _credentials = new();
+    private readonly PinnedWindowManager _pinnedWindows = new();
     private PromptSettingsForm? _promptSettingsForm;
     private ApiSettingsForm? _apiSettingsForm;
 
@@ -46,8 +47,10 @@ public sealed class TrayApplicationContext : ApplicationContext
             new OcrService(),
             ShowOcrNotification,
             new ConfiguredOutfitPreviewService(_outfitSettings, _credentials), _outfitSettings,
-            new DeepSeekTranslationService(_credentials, _outfitSettings));
-        _hotkeyManager.HotkeyPressed += (_, args) => _screenshotController.BeginCapture(args.Action == HotkeyAction.Ocr);
+            new DeepSeekTranslationService(_credentials, _outfitSettings), _pinnedWindows);
+        _hotkeyManager.HotkeyPressed += (_, args) => _screenshotController.BeginCapture(
+            extractTextOnSelection: args.Action == HotkeyAction.Ocr,
+            pinOnSelection: args.Action == HotkeyAction.Pin);
 
         ToolStripMenuItem startupItem = new("开机启动")
         {
@@ -90,6 +93,7 @@ public sealed class TrayApplicationContext : ApplicationContext
 
         RegisterHotkey(_hotkeyManager.RegisterScreenshotHotkey, "Alt + A");
         RegisterHotkey(_hotkeyManager.RegisterOcrHotkey, "Alt + Shift + A");
+        RegisterHotkey(_hotkeyManager.RegisterPinHotkey, "Alt + Shift + P");
     }
 
     private void RegisterHotkey(Action register, string label)
@@ -115,6 +119,7 @@ public sealed class TrayApplicationContext : ApplicationContext
         _notifyIcon.Dispose();
         _hotkeyManager.Dispose();
         _screenshotController.Dispose();
+        _pinnedWindows.Dispose();
         _promptSettingsForm?.Dispose();
         _apiSettingsForm?.Dispose();
         base.ExitThreadCore();

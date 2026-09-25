@@ -19,6 +19,8 @@ public sealed class ScreenshotController
     private ScreenshotOverlayForm? _overlay;
     private readonly OutfitPreviewRequestGate _outfitRequestGate = new();
     private readonly ITranslationService? _translationService;
+    private readonly PinnedWindowManager _pinnedWindows;
+    private readonly bool _ownsPinnedWindows;
     private CancellationTokenSource? _translationCancellation;
     private bool _isCapturing;
     private bool _disposed;
@@ -35,7 +37,7 @@ public sealed class ScreenshotController
         OcrService ocrService,
         Action<string> notify,
         IOutfitGenerationService? outfitPreviewService = null, OutfitSettingsStore? settingsStore = null,
-        ITranslationService? translationService = null)
+        ITranslationService? translationService = null, PinnedWindowManager? pinnedWindows = null)
     {
         _captureEngine = captureEngine;
         _clipboardManager = clipboardManager;
@@ -44,9 +46,11 @@ public sealed class ScreenshotController
         _notify = notify;
         _settingsStore = settingsStore;
         _translationService = translationService;
+        _pinnedWindows = pinnedWindows ?? new PinnedWindowManager();
+        _ownsPinnedWindows = pinnedWindows is null;
     }
 
-    public void BeginCapture(bool extractTextOnSelection = false)
+    public void BeginCapture(bool extractTextOnSelection = false, bool pinOnSelection = false)
     {
         if (_isCapturing)
         {
@@ -55,27 +59,30 @@ public sealed class ScreenshotController
         }
 
         Rectangle virtualScreenBounds = GetVirtualScreenBounds();
-        Bitmap desktopSnapshot = _captureEngine.Capture(virtualScreenBounds);
+        Bitmap desktopSnapshot;
+        using (_pinnedWindows.HideVisibleForCapture())
+            desktopSnapshot = _captureEngine.Capture(virtualScreenBounds);
 
-        ScreenshotOverlayForm overlay = CreateOverlay(virtualScreenBounds, desktopSnapshot, extractTextOnSelection);
+        ScreenshotOverlayForm overlay = CreateOverlay(virtualScreenBounds, desktopSnapshot, extractTextOnSelection, pinOnSelection);
         overlay.Show();
         overlay.Activate();
     }
 
-    internal ScreenshotOverlayForm BeginCaptureForTesting(Bitmap desktopSnapshot)
+    internal ScreenshotOverlayForm BeginCaptureForTesting(Bitmap desktopSnapshot, bool pinOnSelection = false)
     {
         ArgumentNullException.ThrowIfNull(desktopSnapshot);
         if (_isCapturing) throw new InvalidOperationException("A capture is already active.");
-        return CreateOverlay(new Rectangle(Point.Empty, desktopSnapshot.Size), new Bitmap(desktopSnapshot), false);
+        return CreateOverlay(new Rectangle(Point.Empty, desktopSnapshot.Size), new Bitmap(desktopSnapshot), false, pinOnSelection);
     }
 
-    private ScreenshotOverlayForm CreateOverlay(Rectangle virtualScreenBounds, Bitmap desktopSnapshot, bool extractTextOnSelection)
+    private ScreenshotOverlayForm CreateOverlay(Rectangle virtualScreenBounds, Bitmap desktopSnapshot, bool extractTextOnSelection, bool pinOnSelection)
     {
         _isCapturing = true;
         _overlay = new ScreenshotOverlayForm(virtualScreenBounds, desktopSnapshot, extractTextOnSelection,
             _settingsStore is null ? null : type => _settingsStore.Load().GetStyle(type).Title,
-            _settingsStore is null ? null : () => _settingsStore.Load().GetEnabledStyles());
+            _settingsStore is null ? null : () => _settingsStore.Load().GetEnabledStyles(), pinOnSelection);
         _overlay.SelectionCompleted += OnSelectionCompleted;
+        _overlay.PinRequested += OnPinRequested;
         _overlay.TextExtractionRequested += OnTextExtractionRequested;
         _overlay.TranslationStartRequested += TryStartTranslation;
         _overlay.TranslationCancellationRequested += OnTranslationCancellationRequested;
@@ -90,8 +97,8 @@ public sealed class ScreenshotController
     {
         try
         {
-            using Bitmap? outfitResult = (sender as ScreenshotOverlayForm)?.CreateOutfitResultImage();
-            using Bitmap bitmap = outfitResult ?? _captureEngine.Capture(selection);
+            using Bitmap bitmap = (sender as ScreenshotOverlayForm)?.CreateCurrentVisualSelectionImage()
+                ?? throw new InvalidOperationException("OCR selection is unavailable.");
             string text = await _ocrService.RecognizeAsync(bitmap);
             if (_disposed)
             {
@@ -135,10 +142,10 @@ public sealed class ScreenshotController
 
         try
         {
-            using Bitmap? translationResult = overlay.CreateTranslationResultImage();
-            using Bitmap? outfitResult = translationResult is null ? overlay.CreateOutfitResultImage() : null;
-            using Bitmap bitmap = translationResult ?? outfitResult ?? overlay.CreateOriginalSelectionImage();
-            Trace.WriteLine($"[Clipboard] CONFIRM_CLICKED HAS_OUTFIT_RESULT={outfitResult is not null} IMAGE_WIDTH={bitmap.Width} IMAGE_HEIGHT={bitmap.Height} PIXEL_FORMAT={bitmap.PixelFormat} CLIPBOARD_THREAD_APARTMENT={Thread.CurrentThread.GetApartmentState()}");
+            bool translated = overlay.HasTranslationResult;
+            bool outfit = overlay.HasOutfitResult;
+            using Bitmap bitmap = overlay.CreateCurrentVisualSelectionImage();
+            Trace.WriteLine($"[Clipboard] CONFIRM_CLICKED HAS_OUTFIT_RESULT={outfit} IMAGE_WIDTH={bitmap.Width} IMAGE_HEIGHT={bitmap.Height} PIXEL_FORMAT={bitmap.PixelFormat} CLIPBOARD_THREAD_APARTMENT={Thread.CurrentThread.GetApartmentState()}");
             if (!_clipboardManager.TrySetImage(bitmap))
             {
                 overlay.ShowOutfitNotice("复制失败，请再试一次", TimeSpan.FromSeconds(3));
@@ -146,7 +153,7 @@ public sealed class ScreenshotController
                 return;
             }
 
-            _notify(translationResult is not null ? "翻译图片已复制" : outfitResult is null ? "截图已复制" : "AI 图片已复制到剪贴板");
+            _notify(translated ? "翻译图片已复制" : outfit ? "AI 图片已复制到剪贴板" : "截图已复制");
             ResetOverlay();
         }
         catch (Exception ex)
@@ -155,6 +162,24 @@ public sealed class ScreenshotController
             if (!overlay.IsDisposed && !overlay.Disposing)
                 overlay.ShowOutfitNotice("复制失败，请再试一次", TimeSpan.FromSeconds(3));
             _notify("复制失败，请再次点击 ✓");
+        }
+    }
+
+    private void OnPinRequested(object? sender, EventArgs e)
+    {
+        if (sender is not ScreenshotOverlayForm overlay || !ReferenceEquals(_overlay, overlay)) return;
+        try
+        {
+            using Bitmap visual = overlay.CreateCurrentVisualSelectionImage();
+            Point location = overlay.CurrentSelectionScreenLocation;
+            _pinnedWindows.Pin(visual, location, _clipboardManager);
+            ResetOverlay();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Pin failed: {ex.GetType().Name}");
+            if (!overlay.IsDisposed && !overlay.Disposing)
+                overlay.ShowOutfitNotice("钉图失败，请重试", TimeSpan.FromSeconds(3));
         }
     }
 
@@ -431,6 +456,7 @@ public sealed class ScreenshotController
         _translationCancellation?.Cancel();
 
         overlay.SelectionCompleted -= OnSelectionCompleted;
+        overlay.PinRequested -= OnPinRequested;
         overlay.TextExtractionRequested -= OnTextExtractionRequested;
         overlay.TranslationStartRequested -= TryStartTranslation;
         overlay.TranslationCancellationRequested -= OnTranslationCancellationRequested;
@@ -464,5 +490,6 @@ public sealed class ScreenshotController
         ResetOverlay();
         _ocrService.Dispose();
         _outfitPreviewService.Dispose();
+        if (_ownsPinnedWindows) _pinnedWindows.Dispose();
     }
 }

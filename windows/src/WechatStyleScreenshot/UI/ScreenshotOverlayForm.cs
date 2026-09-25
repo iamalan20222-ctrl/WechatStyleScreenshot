@@ -23,6 +23,7 @@ public sealed class ScreenshotOverlayForm : Form
     private readonly Func<OutfitStylePresetType, string>? _styleTitleProvider;
     private readonly Func<IReadOnlyList<OutfitStylePreset>>? _availableStylesProvider;
     private readonly bool _extractTextOnSelection;
+    private readonly bool _pinOnSelection;
     private readonly System.Windows.Forms.Timer _outfitTimer;
     private readonly ToolTip _toolTip = new();
     private OutfitPreviewSession? _outfitSession;
@@ -33,6 +34,9 @@ public sealed class ScreenshotOverlayForm : Form
     private Rectangle _translationButtonBounds;
     private Rectangle _outfitButtonBounds;
     private Rectangle _confirmButtonBounds;
+    private Rectangle _pinButtonBounds;
+    private bool _pinHovered;
+    private bool _pinPressed;
     private Rectangle _stylePickerBounds;
     private readonly Rectangle[] _styleOptionBounds = new Rectangle[8];
     private IReadOnlyList<OutfitStylePreset> _visibleStyles = OutfitStyleCatalog.BuiltIn;
@@ -61,6 +65,7 @@ public sealed class ScreenshotOverlayForm : Form
     private long _translationStartedAt;
 
     public event EventHandler<Rectangle>? SelectionCompleted;
+    public event EventHandler? PinRequested;
     public event EventHandler<Rectangle>? TextExtractionRequested;
     public event Func<ScreenshotOverlayForm, bool>? TranslationStartRequested;
     public event EventHandler? TranslationCancellationRequested;
@@ -71,8 +76,20 @@ public sealed class ScreenshotOverlayForm : Form
 
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
+    internal bool HasOutfitResult => _outfitSession?.HasResult == true;
     internal TranslationState TranslationStateForTesting => _translationState;
     internal bool HasTranslationResultForTesting => _translationResultImage is not null;
+    internal bool HasTranslationResult => _translationResultImage is not null;
+    internal Rectangle PinButtonBoundsForTesting => _pinButtonBounds;
+    public Point CurrentSelectionScreenLocation => new(_selection.Left + _virtualBounds.Left, _selection.Top + _virtualBounds.Top);
+    internal bool PinOnSelectionForTesting => _pinOnSelection;
+    internal bool ToolbarVisibleForTesting => _hasSelection && !_pinOnSelection;
+    internal void ClickPinForTesting()
+    {
+        Point center = new(_pinButtonBounds.Left + _pinButtonBounds.Width / 2, _pinButtonBounds.Top + _pinButtonBounds.Height / 2);
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+        OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+    }
     internal bool ClickTranslationButtonForTesting()
     {
         Point center = new(_translationButtonBounds.Left + 15, _translationButtonBounds.Top + 15);
@@ -153,11 +170,13 @@ public sealed class ScreenshotOverlayForm : Form
 
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false,
         Func<OutfitStylePresetType, string>? styleTitleProvider = null,
-        Func<IReadOnlyList<OutfitStylePreset>>? availableStylesProvider = null)
+        Func<IReadOnlyList<OutfitStylePreset>>? availableStylesProvider = null,
+        bool pinOnSelection = false)
     {
         _virtualBounds = virtualBounds;
         _desktopSnapshot = desktopSnapshot;
         _extractTextOnSelection = extractTextOnSelection;
+        _pinOnSelection = pinOnSelection;
         _styleTitleProvider = styleTitleProvider;
         _availableStylesProvider = availableStylesProvider;
         _outfitTimer = new System.Windows.Forms.Timer { Interval = 100 };
@@ -194,6 +213,14 @@ public sealed class ScreenshotOverlayForm : Form
             {
                 RequestOutfitCancellation();
             }
+            return;
+        }
+
+        if (_hasSelection && e.Button == MouseButtons.Left && !_pinOnSelection && _pinButtonBounds.Contains(e.Location))
+        {
+            _pinPressed = true;
+            Capture = true;
+            Invalidate(_pinButtonBounds);
             return;
         }
 
@@ -296,6 +323,12 @@ public sealed class ScreenshotOverlayForm : Form
     {
         base.OnMouseMove(e);
 
+        if (_pinPressed)
+        {
+            Cursor = Cursors.Hand;
+            return;
+        }
+
         if (_isHoldingOriginalPreview)
         {
             Cursor = Cursors.Hand;
@@ -333,6 +366,19 @@ public sealed class ScreenshotOverlayForm : Form
         {
             if (_hasSelection)
             {
+                bool pinHovered = !_pinOnSelection && _pinButtonBounds.Contains(e.Location);
+                if (_pinHovered != pinHovered)
+                {
+                    _pinHovered = pinHovered;
+                    Invalidate(_pinButtonBounds);
+                }
+                if (pinHovered)
+                {
+                    Cursor = Cursors.Hand;
+                    _toolTip.Show("钉在桌面", this, e.X + 8, e.Y + 8, 900);
+                    UpdateHoveredToolbarButton(ToolbarButtonHit.None);
+                    return;
+                }
                 ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _translationButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
                 UpdateHoveredToolbarButton(hoveredButton);
                 if (hoveredButton == ToolbarButtonHit.OutfitPreview)
@@ -353,7 +399,17 @@ public sealed class ScreenshotOverlayForm : Form
 
     protected override void OnMouseUp(MouseEventArgs e)
     {
+        bool wasPressingPin = _pinPressed;
         base.OnMouseUp(e);
+
+        if (wasPressingPin && e.Button == MouseButtons.Left)
+        {
+            _pinPressed = false;
+            Capture = false;
+            Invalidate(_pinButtonBounds);
+            if (_pinButtonBounds.Contains(e.Location) && !IsPinDisabled) PinRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
 
         if (_isHoldingOriginalPreview && e.Button == MouseButtons.Left)
         {
@@ -395,6 +451,11 @@ public sealed class ScreenshotOverlayForm : Form
         _hasSelection = true;
         ResetOutfitForSelection();
         _hoveredToolbarButton = ToolbarButtonHit.None;
+        if (_pinOnSelection)
+        {
+            PinRequested?.Invoke(this, EventArgs.Empty);
+            return;
+        }
         if (_extractTextOnSelection)
         {
             RequestTextExtraction();
@@ -408,6 +469,7 @@ public sealed class ScreenshotOverlayForm : Form
     protected override void OnMouseCaptureChanged(EventArgs e)
     {
         base.OnMouseCaptureChanged(e);
+        if (_pinPressed && !Capture) { _pinPressed = false; Invalidate(_pinButtonBounds); }
         if (_isHoldingOriginalPreview && !Capture) ResetOriginalComparePreview();
     }
 
@@ -583,10 +645,11 @@ public sealed class ScreenshotOverlayForm : Form
             else DrawOutfitStatus(e.Graphics, selection);
         }
 
-        if (_hasSelection)
+        if (ToolbarVisibleForTesting)
         {
             DrawToolbar(e.Graphics);
             if (_stylePickerOpen) DrawStylePicker(e.Graphics);
+            DrawPinButton(e.Graphics);
         }
     }
 
@@ -637,6 +700,7 @@ public sealed class ScreenshotOverlayForm : Form
 
         y = Math.Clamp(y, 8, ClientRectangle.Bottom - ToolbarHeight - 8);
         _toolbarBounds = new Rectangle(x, y, ToolbarWidth, ToolbarHeight);
+        _pinButtonBounds = PinButtonLayout.GetBounds(_selection, ClientRectangle, DeviceDpi);
         _cancelButtonBounds = new Rectangle(_toolbarBounds.Left + 16, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _translationButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
@@ -758,6 +822,9 @@ public sealed class ScreenshotOverlayForm : Form
 
     public Bitmap? CreateTranslationResultImage() => _translationResultImage is null ? null : new Bitmap(_translationResultImage);
 
+    public Bitmap CreateCurrentVisualSelectionImage() =>
+        CreateTranslationResultImage() ?? CreateOutfitResultImage() ?? CreateOriginalSelectionImage();
+
     public bool TryBeginTranslation()
     {
         if (!_hasSelection || IsTranslationBusy || _outfitSession?.IsBusy == true) return false;
@@ -807,6 +874,28 @@ public sealed class ScreenshotOverlayForm : Form
     }
 
     private bool IsTranslationBusy => _translationState is TranslationState.Recognizing or TranslationState.Translating or TranslationState.Applying;
+    private bool IsPinDisabled => IsTranslationBusy || _outfitSession?.IsBusy == true;
+
+    private void DrawPinButton(Graphics graphics)
+    {
+        if (_pinHovered || _pinPressed)
+        {
+            using SolidBrush hover = new(Color.FromArgb(_pinPressed ? 125 : 75, Color.White));
+            graphics.FillEllipse(hover, _pinButtonBounds);
+        }
+        int iconSize = Math.Max(20, (int)Math.Round((_pinPressed ? 22 : _pinHovered ? 26 : 24) * DeviceDpi / 96d));
+        Bitmap icon = PinIcon.Get(iconSize);
+        Rectangle destination = new(_pinButtonBounds.Left + (_pinButtonBounds.Width - iconSize) / 2,
+            _pinButtonBounds.Top + (_pinButtonBounds.Height - iconSize) / 2, iconSize, iconSize);
+        if (IsPinDisabled)
+        {
+            using ImageAttributes attributes = new();
+            System.Drawing.Imaging.ColorMatrix matrix = new() { Matrix33 = 0.4f };
+            attributes.SetColorMatrix(matrix);
+            graphics.DrawImage(icon, destination, 0, 0, icon.Width, icon.Height, GraphicsUnit.Pixel, attributes);
+        }
+        else graphics.DrawImage(icon, destination);
+    }
 
     private void RequestOutfitCancellation()
     {

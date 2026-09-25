@@ -127,6 +127,10 @@ Windows 按 `Alt + Shift + A` 后拖拽选区，松开鼠标即开始识别；�
 
 首次使用时，在托盘“添加 APIKEY”窗口的“翻译 API”页单独配置 DeepSeek Key。该 Key 由 Windows 当前用户 DPAPI 加密保存，不写入 `settings.json`；默认模型为 `deepseek-v4-flash`，也可选择 `deepseek-v4-pro`。可选择简体中文、English、日本語或 한국어。服务商可能记录收到的 OCR 文本，请避免翻译包含敏感信息的截图。
 
+## Windows 截图钉图
+
+`Alt + A` 框选后，点击选区右上角红色图钉，即可将当前画面（普通截图、翻译结果或 AI 换装结果）钉成独立贴图。也可按 `Alt + Shift + P` 框选，松开后直接钉图。贴图可拖动、滚轮或右下角手柄等比例缩放，右键可复制原始质量图片、保存 PNG、恢复大小、切换置顶或关闭；支持多张同时存在。再次截图时，已有贴图会短暂隐藏，避免进入新截图。退出程序后贴图不会保留。
+
 Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。macOS 使用系统 Vision 框架。两端识别都在本机完成，不调用云端服务。
 
 ## 隐私

@@ -8,6 +8,7 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
     private const int WmHotkey = 0x0312;
     public const int ScreenshotHotkeyId = 0x4141;
     public const int OcrHotkeyId = 0x4142;
+    public const int PinHotkeyId = 0x4143;
     private const uint ModAlt = 0x0001;
     private const uint ModShift = 0x0004;
 
@@ -30,6 +31,8 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
     {
         Register(OcrHotkeyId, ModAlt | ModShift, Keys.A);
     }
+
+    public void RegisterPinHotkey() => Register(PinHotkeyId, ModAlt | ModShift, Keys.P);
 
     public void RegisterAltA()
     {
@@ -75,6 +78,7 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
         {
             ScreenshotHotkeyId => HotkeyAction.Screenshot,
             OcrHotkeyId => HotkeyAction.Ocr,
+            PinHotkeyId => HotkeyAction.Pin,
             _ => null
         };
     }
@@ -101,7 +105,8 @@ public sealed class HotkeyManager : NativeWindow, IDisposable
 public enum HotkeyAction
 {
     Screenshot,
-    Ocr
+    Ocr,
+    Pin
 }
 
 public sealed class HotkeyPressedEventArgs : EventArgs
