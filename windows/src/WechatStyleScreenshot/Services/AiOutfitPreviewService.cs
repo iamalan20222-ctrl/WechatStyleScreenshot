@@ -44,6 +44,7 @@ public sealed record OutfitPreviewAttempt(
 
 public sealed class AiOutfitPreviewService : IImageEditProvider, IOutfitGenerationService
 {
+    public const string DefaultModel = "doubao-seedream-5-0-flash-260915";
     private const int MaxErrorBodyBytes = 8 * 1024;
     private const string Endpoint = "https://ark.cn-beijing.volces.com/api/v3/images/generations";
     private readonly HttpClient _httpClient;
@@ -58,7 +59,7 @@ public sealed class AiOutfitPreviewService : IImageEditProvider, IOutfitGenerati
         _ownsClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
         _apiKey = apiKey ?? Environment.GetEnvironmentVariable("ARK_API_KEY");
-        _model = model ?? Environment.GetEnvironmentVariable("ARK_MODEL") ?? "doubao-seedream-5-0-pro-260628";
+        _model = model ?? Environment.GetEnvironmentVariable("ARK_MODEL") ?? DefaultModel;
         _delayAsync = delayAsync ?? ((delay, token) => Task.Delay(delay, token));
     }
 

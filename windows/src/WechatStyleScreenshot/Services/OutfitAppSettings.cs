@@ -15,7 +15,7 @@ public sealed class OutfitAppSettings
     public Dictionary<string, StyleSetting> Styles { get; set; } = new();
     public ImageEditProviderKind DefaultProvider { get; set; } = ImageEditProviderKind.Volcano;
     public bool LegacyVolcanoKeyMigrated { get; set; }
-    public string VolcanoModel { get; set; } = "doubao-seedream-5-0-pro-260628";
+    public string VolcanoModel { get; set; } = AiOutfitPreviewService.DefaultModel;
     public string QwenModel { get; set; } = "qwen-image-3.0-pro";
     public string QwenRegion { get; set; } = "Beijing";
     public string QwenWorkspaceId { get; set; } = "";
@@ -78,7 +78,11 @@ public sealed class OutfitSettingsStore
         try
         {
             if (!File.Exists(FilePath)) return new OutfitAppSettings();
-            return JsonSerializer.Deserialize<OutfitAppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new OutfitAppSettings();
+            OutfitAppSettings settings = JsonSerializer.Deserialize<OutfitAppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new OutfitAppSettings();
+            if (string.IsNullOrWhiteSpace(settings.VolcanoModel) ||
+                settings.VolcanoModel == "doubao-seedream-5-0-pro-260628")
+                settings.VolcanoModel = AiOutfitPreviewService.DefaultModel;
+            return settings;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {

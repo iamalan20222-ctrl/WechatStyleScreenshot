@@ -51,6 +51,88 @@ public class OutfitSettingsTests
     }
 
     [Fact]
+    public void VolcanoModelDefaultMigratesButCustomAndOtherProviderSettingsRemain()
+    {
+        string path = TempFile("settings.json");
+        OutfitSettingsStore store = new(path);
+        OutfitAppSettings oldDefault = new()
+        {
+            VolcanoModel = "doubao-seedream-5-0-pro-260628",
+            QwenModel = "qwen-image-3.0",
+            OpenAiModel = "gpt-image-2"
+        };
+        store.Save(oldDefault);
+        Assert.Equal("doubao-seedream-5-0-flash-260915", store.Load().VolcanoModel);
+        Assert.Equal("qwen-image-3.0", store.Load().QwenModel);
+        Assert.Equal("gpt-image-2", store.Load().OpenAiModel);
+
+        oldDefault.VolcanoModel = "my-custom-volcano-model";
+        store.Save(oldDefault);
+        Assert.Equal("my-custom-volcano-model", store.Load().VolcanoModel);
+    }
+
+    [Fact]
+    public void ApiSettingsShowsNewVolcanoModelDefaultAndPreservesSavedOverride()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
+        OutfitSettingsStore store = new(Path.Combine(directory, "settings.json"));
+        CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
+        store.Save(new OutfitAppSettings());
+        Assert.Equal("doubao-seedream-5-0-flash-260915", ReadVolcanoModel(store, credentials));
+        OutfitAppSettings custom = store.Load();
+        custom.VolcanoModel = "my-custom-volcano-model";
+        store.Save(custom);
+        Assert.Equal("my-custom-volcano-model", ReadVolcanoModel(store, credentials));
+    }
+
+    [Fact]
+    public async Task VolcanoProviderUsesFlashDefaultAndKeepsInlineImagePayload()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
+        OutfitSettingsStore settings = new(Path.Combine(directory, "settings.json"));
+        settings.Save(new OutfitAppSettings());
+        CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
+        credentials.SaveCredential(ImageEditProviderKind.Volcano, "test-volcano-key");
+        bool called = false;
+        using HttpClient client = new(new StubHandler(async (request, token) =>
+        {
+            called = true;
+            Assert.Equal("https://ark.cn-beijing.volces.com/api/v3/images/generations", request.RequestUri!.ToString());
+            using JsonDocument body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            Assert.Equal("doubao-seedream-5-0-flash-260915", body.RootElement.GetProperty("model").GetString());
+            Assert.StartsWith("data:image/png;base64,", body.RootElement.GetProperty("image").GetString());
+            return SuccessImage();
+        }));
+        using ConfiguredOutfitPreviewService service = new(settings, credentials, client);
+        using Bitmap image = new(6, 8);
+        OutfitPreviewResult result = await service.GenerateAsync(image, new OutfitPreviewOptions());
+        result.Image?.Dispose();
+        Assert.True(called);
+        Assert.Equal(OutfitPreviewStatus.Success, result.Status);
+    }
+
+    private static string ReadVolcanoModel(OutfitSettingsStore store, CredentialStore credentials)
+    {
+        Exception? failure = null;
+        string? value = null;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                using ApiSettingsForm form = new(store, credentials);
+                ComboBox model = Descendants(form).OfType<ComboBox>().Single(box => box.Text.Contains("doubao", StringComparison.OrdinalIgnoreCase) || box.Text.StartsWith("my-custom", StringComparison.Ordinal));
+                value = model.Text;
+            }
+            catch (Exception ex) { failure = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+        return value!;
+    }
+
+    [Fact]
     public void LegacyDefaultBTitleMigratesWithoutChangingCustomPromptOrCustomTitle()
     {
         OutfitAppSettings settings = new();
