@@ -14,6 +14,8 @@ public sealed class ScreenshotOverlayForm : Form
     private const int ToolbarHeight = 46;
     private const int ToolbarGap = 14;
     private const int ToolbarButtonSize = 30;
+    private const int StylePickerWidth = 168;
+    private const int StylePickerHeight = 126;
     private static readonly Color AccentColor = Color.FromArgb(46, 190, 112);
     private static readonly Color CancelColor = Color.FromArgb(232, 89, 89);
 
@@ -29,6 +31,11 @@ public sealed class ScreenshotOverlayForm : Form
     private Rectangle _ocrButtonBounds;
     private Rectangle _outfitButtonBounds;
     private Rectangle _confirmButtonBounds;
+    private Rectangle _stylePickerBounds;
+    private readonly Rectangle[] _styleOptionBounds = new Rectangle[3];
+    private bool _stylePickerOpen;
+    private int _hoveredStyleIndex = -1;
+    private OutfitStylePresetType _lastChosenStyle = OutfitStylePresetType.Sport;
     private Point _dragStart;
     private Point _dragCurrent;
     private Point _adjustStart;
@@ -47,13 +54,15 @@ public sealed class ScreenshotOverlayForm : Form
 
     public event EventHandler<Rectangle>? SelectionCompleted;
     public event EventHandler<Rectangle>? TextExtractionRequested;
-    public event Func<ScreenshotOverlayForm, bool>? OutfitPreviewStartRequested;
+    public event Func<ScreenshotOverlayForm, OutfitStylePresetType, bool>? OutfitPreviewStartRequested;
     public event EventHandler? OutfitPreviewCancellationRequested;
     public event EventHandler? CaptureCancelled;
     internal event Action<OutfitPreviewState>? OutfitStateChangedForTesting;
 
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
+    internal bool IsStylePickerOpenForTesting => _stylePickerOpen;
+    internal IReadOnlyList<string> StyleLabelsForTesting => OutfitStyleCatalog.All.Select(style => style.Label).ToArray();
     internal Bitmap CreateOutfitOriginalImageForTesting() =>
         _outfitSession?.CreateRequestImage() ?? throw new InvalidOperationException("No selection is active.");
 
@@ -73,8 +82,22 @@ public sealed class ScreenshotOverlayForm : Form
         Point center = new(_outfitButtonBounds.Left + _outfitButtonBounds.Width / 2,
             _outfitButtonBounds.Top + _outfitButtonBounds.Height / 2);
         OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+        return _stylePickerOpen;
+    }
+
+    internal bool ClickStyleForTesting(OutfitStylePresetType style)
+    {
+        if (!_stylePickerOpen) return false;
+        int index = OutfitStyleCatalog.All.ToList().FindIndex(item => item.Type == style);
+        if (index < 0) return false;
+        Rectangle bounds = _styleOptionBounds[index];
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, bounds.Left + bounds.Width / 2,
+            bounds.Top + bounds.Height / 2, 0));
         return OutfitStateForTesting == OutfitPreviewState.Preparing;
     }
+
+    internal void ClickOutsideStylePickerForTesting() =>
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, 0, 0, 0));
 
     internal void ClickConfirmButtonForTesting()
     {
@@ -115,6 +138,23 @@ public sealed class ScreenshotOverlayForm : Form
             {
                 RequestOutfitCancellation();
             }
+            return;
+        }
+
+        if (_stylePickerOpen)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                for (int index = 0; index < _styleOptionBounds.Length; index++)
+                {
+                    if (_styleOptionBounds[index].Contains(e.Location))
+                    {
+                        SelectOutfitStyle(OutfitStyleCatalog.All[index].Type);
+                        return;
+                    }
+                }
+            }
+            CloseStylePicker();
             return;
         }
 
@@ -189,6 +229,18 @@ public sealed class ScreenshotOverlayForm : Form
         if (_outfitSession?.IsBusy == true)
         {
             Cursor = Cursors.Default;
+            return;
+        }
+
+        if (_stylePickerOpen)
+        {
+            int hovered = Array.FindIndex(_styleOptionBounds, bounds => bounds.Contains(e.Location));
+            if (hovered != _hoveredStyleIndex)
+            {
+                _hoveredStyleIndex = hovered;
+                Invalidate(_stylePickerBounds);
+            }
+            Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
             return;
         }
 
@@ -307,14 +359,36 @@ public sealed class ScreenshotOverlayForm : Form
     private void RequestOutfitPreview()
     {
         if (!_hasSelection || !SelectionMath.IsCapturable(_selection) || _outfitSession is null) return;
-        if (OutfitPreviewStartRequested?.Invoke(this) == true) return;
+        _stylePickerOpen = true;
+        _hoveredStyleIndex = -1;
+        UpdateStylePickerBounds();
+        Invalidate(_stylePickerBounds);
+    }
+
+    private void SelectOutfitStyle(OutfitStylePresetType style)
+    {
+        CloseStylePicker();
+        if (OutfitPreviewStartRequested?.Invoke(this, style) == true)
+        {
+            _lastChosenStyle = style;
+            return;
+        }
         ShowOutfitNotice("AI 服务准备中…", TimeSpan.FromSeconds(1));
+    }
+
+    private void CloseStylePicker()
+    {
+        if (!_stylePickerOpen) return;
+        _stylePickerOpen = false;
+        _hoveredStyleIndex = -1;
+        Invalidate(_stylePickerBounds);
     }
 
     public bool TryBeginOutfitPreview()
     {
         if (IsDisposed || Disposing || !_hasSelection || !SelectionMath.IsCapturable(_selection) ||
             _outfitSession is null || !_outfitSession.TryBegin()) return false;
+        CloseStylePicker();
         _outfitCancellationRequested = false;
         _outfitNotice = null;
         _outfitStartedAt = Stopwatch.GetTimestamp();
@@ -332,6 +406,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (e.KeyCode == Keys.Escape)
         {
             if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
+            else if (_stylePickerOpen) CloseStylePicker();
             else CancelCapture();
         }
         else if (e.Control && e.KeyCode == Keys.Z)
@@ -393,6 +468,7 @@ public sealed class ScreenshotOverlayForm : Form
         if (_hasSelection)
         {
             DrawToolbar(e.Graphics);
+            if (_stylePickerOpen) DrawStylePicker(e.Graphics);
         }
     }
 
@@ -445,6 +521,18 @@ public sealed class ScreenshotOverlayForm : Form
         _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _confirmButtonBounds = new Rectangle(_toolbarBounds.Right - 16 - ToolbarButtonSize, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        UpdateStylePickerBounds();
+    }
+
+    private void UpdateStylePickerBounds()
+    {
+        int x = Math.Clamp(_outfitButtonBounds.Left - 69, 8, Math.Max(8, ClientRectangle.Right - StylePickerWidth - 8));
+        int y = _toolbarBounds.Top - StylePickerHeight - 7;
+        if (y < 8) y = _toolbarBounds.Bottom + 7;
+        y = Math.Clamp(y, 8, Math.Max(8, ClientRectangle.Bottom - StylePickerHeight - 8));
+        _stylePickerBounds = new Rectangle(x, y, StylePickerWidth, StylePickerHeight);
+        for (int index = 0; index < _styleOptionBounds.Length; index++)
+            _styleOptionBounds[index] = new Rectangle(x + 6, y + 6 + index * 38, StylePickerWidth - 12, 36);
     }
 
     public Bitmap CreateOutfitRequestImage()
@@ -563,6 +651,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void ResetOutfitForSelection()
     {
+        CloseStylePicker();
         _outfitTimer.Stop();
         _outfitSession?.Dispose();
         _outfitSession = null;
@@ -694,6 +783,30 @@ public sealed class ScreenshotOverlayForm : Form
         Point checkMiddle = new(_confirmButtonBounds.Left + 13, _confirmButtonBounds.Top + 22);
         Point checkEnd = new(_confirmButtonBounds.Right - 6, _confirmButtonBounds.Top + 8);
         graphics.DrawLines(confirmPen, new[] { checkStart, checkMiddle, checkEnd });
+    }
+
+    private void DrawStylePicker(Graphics graphics)
+    {
+        using GraphicsPath panel = RoundedRectangle(_stylePickerBounds, 8);
+        using SolidBrush background = new(Color.FromArgb(244, 32, 32, 36));
+        graphics.FillPath(background, panel);
+        using Font font = new("Microsoft YaHei UI", 10f, FontStyle.Regular, GraphicsUnit.Point);
+        using StringFormat format = new() { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center };
+        for (int index = 0; index < OutfitStyleCatalog.All.Count; index++)
+        {
+            OutfitStylePreset style = OutfitStyleCatalog.All[index];
+            Rectangle row = _styleOptionBounds[index];
+            if (index == _hoveredStyleIndex || style.Type == _lastChosenStyle)
+            {
+                using SolidBrush highlight = new(index == _hoveredStyleIndex
+                    ? Color.FromArgb(80, AccentColor) : Color.FromArgb(36, AccentColor));
+                using GraphicsPath rowPath = RoundedRectangle(row, 5);
+                graphics.FillPath(highlight, rowPath);
+            }
+            using SolidBrush text = new(Color.WhiteSmoke);
+            graphics.DrawString(style.Label, font, text,
+                new Rectangle(row.Left + 12, row.Top, row.Width - 20, row.Height), format);
+        }
     }
 
     private void DrawButtonHover(Graphics graphics, Rectangle buttonBounds, ToolbarButtonHit button)

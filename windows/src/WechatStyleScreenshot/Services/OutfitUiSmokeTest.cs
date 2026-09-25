@@ -116,7 +116,9 @@ internal static class OutfitUiSmokeTest
                     {
                         stage = $"GENERATION_{number}_BUTTON_CLICK";
                         if (!overlay.ClickOutfitButtonForTesting())
-                            throw new InvalidOperationException($"Outfit button click {number} did not start a request.");
+                            throw new InvalidOperationException($"Outfit button click {number} did not open the style picker.");
+                        if (!overlay.ClickStyleForTesting(OutfitStylePresetType.Sport))
+                            throw new InvalidOperationException($"Style selection {number} did not start a request.");
                         Log($"GENERATION_{number}_OUTFIT_BUTTON_TRIGGER: true");
                         stage = $"GENERATION_{number}_WAIT_SUCCESS";
                         await finished.Task.WaitAsync(TimeSpan.FromSeconds(150));

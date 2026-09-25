@@ -1,12 +1,13 @@
 namespace WechatStyleScreenshot.Services;
 
-public sealed record OutfitPreviewOptions(string Style, string Color, string GarmentCategory)
+public sealed record OutfitPreviewOptions(string Style, string Color, string GarmentCategory, OutfitStylePresetType Preset = OutfitStylePresetType.Sport)
 {
-    private static readonly string[] Styles = ["sweet", "French", "minimal", "sporty", "seamless", "comfortable lounge"];
     private static readonly string[] Colors = ["black", "white", "nude", "pink", "burgundy", "blue-gray"];
-    private static readonly string[] Categories = ["bra set", "wireless underwear", "sports bra", "bodysuit", "loungewear", "seamless basics"];
 
-    public OutfitPreviewOptions() : this(Pick(Styles), Pick(Colors), Pick(Categories)) { }
+    public OutfitPreviewOptions() : this(OutfitStylePresetType.Sport) { }
+
+    public OutfitPreviewOptions(OutfitStylePresetType preset) : this(
+        Pick(OutfitStyleCatalog.Get(preset).Directions), Pick(Colors), OutfitStyleCatalog.Get(preset).Garment, preset) { }
 
     private static string Pick(string[] options) => options[Random.Shared.Next(options.Length)];
 }

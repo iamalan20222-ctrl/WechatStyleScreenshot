@@ -46,7 +46,7 @@ public class OutfitUiFlowTests
                 {
                     if (state == OutfitPreviewState.Error)
                     {
-                        if (!overlay.ClickOutfitButtonForTesting())
+                        if (!StartStyle(overlay, OutfitStylePresetType.Bikini))
                         {
                             failure = new InvalidOperationException("Retry click was rejected while Error was visible.");
                             overlay.BeginInvoke(new Action(overlay.Close));
@@ -62,7 +62,7 @@ public class OutfitUiFlowTests
                 {
                     overlay.SetSelectionForTesting(new Rectangle(10, 10, 300, 400));
                     timeout.Start();
-                    if (!overlay.ClickOutfitButtonForTesting())
+                    if (!StartStyle(overlay, OutfitStylePresetType.Sport))
                     {
                         failure = new InvalidOperationException("First click was rejected.");
                         overlay.Close();
@@ -93,6 +93,7 @@ public class OutfitUiFlowTests
         List<string> inputHashes = [];
         List<CancellationTokenSource> acquired = [];
         List<CancellationTokenSource> released = [];
+        List<string> prompts = [];
         using ManualResetEventSlim finished = new();
         Thread uiThread = new(() =>
         {
@@ -105,7 +106,7 @@ public class OutfitUiFlowTests
                 {
                     data = new[] { new { b64_json = Convert.ToBase64String(imageStream.ToArray()) } }
                 });
-                using HttpClient client = new(new ImmediateImageHandler(responseJson, () => requests++));
+                using HttpClient client = new(new ImmediateImageHandler(responseJson, () => requests++, onPrompt: prompt => prompts.Add(prompt)));
                 using AiOutfitPreviewService service = new(client, apiKey: "test-only");
                 ScreenshotController controller = new(new ScreenCaptureEngine(), new ClipboardManager(),
                     new OcrService(), _ => { }, service);
@@ -140,7 +141,7 @@ public class OutfitUiFlowTests
                         return;
                     }
 
-                    if (!overlay.ClickOutfitButtonForTesting())
+                    if (!StartStyle(overlay, (OutfitStylePresetType)successes))
                     {
                         failure = new InvalidOperationException($"Click after success {successes} was rejected.");
                         overlay.BeginInvoke(new Action(overlay.Close));
@@ -152,7 +153,7 @@ public class OutfitUiFlowTests
                     using Bitmap original = overlay.CreateOutfitOriginalImageForTesting();
                     originalHash = HashImage(original);
                     timeout.Start();
-                    if (!overlay.ClickOutfitButtonForTesting())
+                    if (!StartStyle(overlay, OutfitStylePresetType.Sport))
                     {
                         failure = new InvalidOperationException("First outfit click was rejected.");
                         overlay.Close();
@@ -183,6 +184,9 @@ public class OutfitUiFlowTests
         Assert.True(acquired.SequenceEqual(released));
         Assert.Equal(3, inputHashes.Count);
         Assert.All(inputHashes, hash => Assert.Equal(originalHash, hash));
+        Assert.Contains("sports bra", prompts[0]);
+        Assert.Contains("swimwear", prompts[1]);
+        Assert.Contains("JK-inspired", prompts[2]);
     }
 
     private static string HashImage(Bitmap image)
@@ -192,7 +196,49 @@ public class OutfitUiFlowTests
         return Convert.ToHexString(SHA256.HashData(stream.ToArray()));
     }
 
-    private sealed class ImmediateImageHandler(string responseJson, Action onRequest, bool failFirst = false) : HttpMessageHandler
+    private static bool StartStyle(ScreenshotOverlayForm overlay, OutfitStylePresetType style) =>
+        overlay.ClickOutfitButtonForTesting() && overlay.ClickStyleForTesting(style);
+
+    [Fact]
+    public void PickerShowsThreeStylesAndOutsideClickDoesNotRequest()
+    {
+        Exception? failure = null;
+        int requests = 0;
+        using ManualResetEventSlim finished = new();
+        Thread uiThread = new(() =>
+        {
+            try
+            {
+                using Bitmap source = new(320, 440);
+                using ScreenshotOverlayForm overlay = new(new Rectangle(0, 0, 320, 440), new Bitmap(source));
+                overlay.OutfitPreviewStartRequested += (_, _) => { requests++; return true; };
+                overlay.Shown += (_, _) =>
+                {
+                    try
+                    {
+                        overlay.SetSelectionForTesting(new Rectangle(10, 10, 300, 400));
+                        Assert.True(overlay.ClickOutfitButtonForTesting());
+                        Assert.Equal(new[] { "A 运动风", "B 比基尼", "C JK穿搭" }, overlay.StyleLabelsForTesting);
+                        Assert.Equal(OutfitPreviewState.None, overlay.OutfitStateForTesting);
+                        overlay.ClickOutsideStylePickerForTesting();
+                        Assert.False(overlay.IsStylePickerOpenForTesting);
+                        Assert.Equal(0, requests);
+                    }
+                    catch (Exception ex) { failure = ex; }
+                    finally { overlay.Close(); }
+                };
+                Application.Run(overlay);
+            }
+            catch (Exception ex) { failure = ex; }
+            finally { finished.Set(); }
+        });
+        uiThread.SetApartmentState(ApartmentState.STA);
+        uiThread.Start();
+        Assert.True(finished.Wait(TimeSpan.FromSeconds(5)));
+        Assert.Null(failure);
+    }
+
+    private sealed class ImmediateImageHandler(string responseJson, Action onRequest, bool failFirst = false, Action<string>? onPrompt = null) : HttpMessageHandler
     {
         private int _requests;
 
@@ -200,6 +246,11 @@ public class OutfitUiFlowTests
         {
             int requestNumber = ++_requests;
             onRequest();
+            if (onPrompt is not null)
+            {
+                using JsonDocument body = JsonDocument.Parse(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
+                onPrompt(body.RootElement.GetProperty("prompt").GetString()!);
+            }
             if (failFirst && requestNumber == 1)
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)
                 {

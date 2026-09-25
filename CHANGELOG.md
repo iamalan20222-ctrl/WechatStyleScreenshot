@@ -4,6 +4,7 @@
 
 ### Added
 
+- Windows “试”按钮新增内嵌款式选择：A 运动风、B 比基尼、C 成人 JK-inspired 穿搭；选款后才生成，再次生成仍使用原图
 - Windows 新增 `--outfit-ui-smoke-test`，可用指定图片自动走三次 Overlay/Controller 试衣流程并记录门控、状态及原图哈希
 - Windows 截图确认工具栏“试”改为选区内即时生成；支持进度/错误显示、取消、基于原图重试，✓复制生成结果
 - AI 穿搭 prompt 身份保持与非裸露约束、成年人和授权确认及云端处理提示

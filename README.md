@@ -90,11 +90,11 @@ macOS 首次截图时可能需要授权：
 8. 右键、红色叉或 `Esc` 取消
 9. 确认后可直接 `Ctrl + V` 粘贴到微信、PPT、浏览器或文档
 10. 点击工具栏“文”可识别选区文字并复制到剪贴板
-11. 点击“试”会立即在当前选区内生成 AI 穿搭预览；可再试一款，点击“✓”复制当前结果，生成中可按 `Esc` 取消
+11. 点击“试”先选择 `A 运动风`、`B 比基尼` 或 `C JK穿搭`；选中后在当前选区内生成，可再次选款重试，点击“✓”复制当前结果，生成中可按 `Esc` 取消
 
 ## AI 穿搭预览
 
-Windows 确认工具栏的 `试` 使用火山方舟 Seedream 图像编辑服务。点击后会在当前选区内立即生成，不会打开新窗口。首次使用前，在启动程序的 PowerShell 会话中配置密钥：
+Windows 确认工具栏的 `试` 使用火山方舟 Seedream 图像编辑服务。点击后在截图界面内打开三款选择浮层；点击 A/B/C 后才发送请求并在原选区生成，不打开新窗口。点击浮层外可关闭而不发送请求；再次点击“试”仍会重新选款，每次均使用原始截图而非上次生成图。首次使用前，在启动程序的 PowerShell 会话中配置密钥：
 
 ```powershell
 $env:ARK_API_KEY = '<your-new-ark-api-key>'
@@ -105,7 +105,7 @@ $env:ARK_API_KEY = '<your-new-ark-api-key>'
 
 该功能仅供设计灵感与穿搭参考，非真实打版或合身结果。提示词要求保持身份、脸部、发型、体型、姿势和背景，并禁止裸露及情色内容，但生成模型无法保证像素级身份或身体结构不变。请仅处理已成年且有授权的模特图片。
 
-开发诊断可运行 `--outfit-smoke-test <图片路径>` 仅测试服务，或运行 `--outfit-ui-smoke-test <图片路径>` 自动测试同一 Overlay 内连续三次“试”。UI 诊断使用指定图片绘制测试窗口，不读取真实桌面；结果与报告保存在图片所在目录的 `ui-results` 中。两种诊断都会真实调用服务并消耗账户额度，且不会输出密钥、图片内容或完整提示词。
+开发诊断可运行 `--outfit-smoke-test <图片路径>` 仅测试服务，或运行 `--outfit-ui-smoke-test <图片路径>` 自动测试同一 Overlay 内连续三次选择运动风生成。UI 诊断使用指定图片绘制测试窗口，不读取真实桌面；结果与报告保存在图片所在目录的 `ui-results` 中。两种诊断都会真实调用服务并消耗账户额度，且不会输出密钥、图片内容或完整提示词。
 
 点击“✓”会将当前选区实际显示的画面复制到剪贴板；AI 预览按选区比例裁剪。复制失败时选区保持打开，可再次点击“✓”。本机剪贴板诊断可运行 `WechatStyleScreenshot.exe --clipboard-smoke-test`，它会写入并读回一张 320×240 的测试图，报告保存在系统临时目录，不调用 AI。
 
@@ -117,7 +117,7 @@ Windows 使用随发布包携带的 Tesseract 5 与 `chi_sim`、`eng` 模型。m
 
 ## 隐私
 
-OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: clicking “试” immediately uploads the selected region. Use only authorized adult-model images. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
+OCR runs locally and requires no API key. The optional AI outfit preview is a separate cloud feature: clicking “试” opens A/B/C style choices; selecting one uploads the selected region. Use only authorized adult-model images. The app does not persist the source image or log its contents; provider-side handling follows the provider policy.
 
 ## 项目结构
 

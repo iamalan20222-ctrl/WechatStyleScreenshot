@@ -153,7 +153,7 @@ public sealed class ScreenshotController
         ResetOverlay();
     }
 
-    private bool TryStartOutfitPreview(ScreenshotOverlayForm overlay)
+    private bool TryStartOutfitPreview(ScreenshotOverlayForm overlay, OutfitStylePresetType style)
     {
         if (_disposed || overlay.IsDisposed || overlay.Disposing || !ReferenceEquals(_overlay, overlay))
         {
@@ -170,11 +170,11 @@ public sealed class ScreenshotController
             return false;
         }
 
-        _ = RunOutfitPreviewAsync(overlay, cancellation, requestNumber);
+        _ = RunOutfitPreviewAsync(overlay, cancellation, requestNumber, style);
         return true;
     }
 
-    private async Task RunOutfitPreviewAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation, int requestNumber)
+    private async Task RunOutfitPreviewAsync(ScreenshotOverlayForm overlay, CancellationTokenSource cancellation, int requestNumber, OutfitStylePresetType style)
     {
         Bitmap? resultImageToDispose = null;
         bool requestReleased = false;
@@ -205,7 +205,7 @@ public sealed class ScreenshotController
             overlay.MarkOutfitGenerating();
             OutfitPreviewResult result = await _outfitPreviewService.GenerateAsync(
                 originalSelection,
-                new OutfitPreviewOptions(),
+                new OutfitPreviewOptions(style),
                 cancellation.Token,
                 (delay, status) => ShowRetryNotice(overlay, delay, status));
             OutfitResponseForTesting?.Invoke(requestNumber, result);
