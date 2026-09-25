@@ -23,9 +23,15 @@ For an adult model only. Fashion-oriented, professional fitting preview; fully c
     public static string Build(OutfitPreviewOptions options, StyleSetting? style = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        style ??= OutfitStyleCatalog.GetDefaultSetting(options.Preset);
-        string title = string.IsNullOrWhiteSpace(style.Title) ? OutfitStyleCatalog.GetDefaultSetting(options.Preset).Title : style.Title.Trim();
-        string editablePrompt = string.IsNullOrWhiteSpace(style.Prompt) ? OutfitStyleCatalog.GetDefaultSetting(options.Preset).Prompt : style.Prompt.Trim();
+        StyleSetting defaults = OutfitStyleCatalog.GetDefaultSetting(options.Preset);
+        style ??= defaults;
+        string title = string.IsNullOrWhiteSpace(style.Title) ? defaults.Title : style.Title.Trim();
+        string editablePrompt = string.IsNullOrWhiteSpace(style.Prompt) ? defaults.Prompt : style.Prompt.Trim();
+        bool customPrompt = !string.Equals(editablePrompt, defaults.Prompt, StringComparison.Ordinal);
+        if (customPrompt && title == defaults.Title) title = "Custom clothing direction";
+        string variation = !customPrompt
+            ? $"Create a tasteful {options.Style} {options.Color} {options.GarmentCategory} outfit. Generate a new, realistic adult fashion editorial design on every request."
+            : "Generate a fresh, realistic adult fashion editorial design consistent with the editable style direction above. Do not add a different garment type or style.";
         return $"""
 {LockedCommonPrompt}
 
@@ -38,7 +44,7 @@ For an adult model only. Fashion-oriented, professional fitting preview; fully c
 {editablePrompt}
 
 [Fresh variation]
-Create a tasteful {options.Style} {options.Color} {options.GarmentCategory} outfit. Generate a new, realistic adult fashion editorial design on every request.
+{variation}
 
 {LockedSafetySuffix}
 """.Trim();

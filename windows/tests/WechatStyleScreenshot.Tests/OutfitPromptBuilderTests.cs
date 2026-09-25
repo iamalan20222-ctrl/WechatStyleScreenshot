@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using WechatStyleScreenshot.Services;
 
 namespace WechatStyleScreenshot.Tests;
@@ -26,6 +27,41 @@ public class OutfitPromptBuilderTests
         Assert.Contains("French", prompt);
         Assert.Contains("Black", prompt);
         Assert.Contains("Bra set", prompt);
+    }
+
+    [Fact]
+    public void LockedPromptLayersStayStyleNeutral()
+    {
+        string locked = string.Join("\n", OutfitPromptBuilder.LockedCommonPrompt,
+            OutfitPromptBuilder.LockedProviderRules, OutfitPromptBuilder.LockedSafetySuffix);
+        foreach (string styleTerm in new[] { "sporty", "sports bra", "minimal black", "functional innerwear",
+                     "bikini", "JK", "pleated skirt", "lace", "swimwear", "school style" })
+            Assert.False(Regex.IsMatch(locked, $@"\b{Regex.Escape(styleTerm)}\b", RegexOptions.IgnoreCase), styleTerm);
+    }
+
+    [Fact]
+    public void EditedSportPromptDoesNotReintroduceDefaultSportOrBlackGarment()
+    {
+        OutfitPreviewOptions options = new("sporty minimal", "black", "sports bra and functional innerwear",
+            OutfitStylePresetType.Sport);
+        StyleSetting edited = new() { Title = "运动风", Prompt = "Replace the clothing with a tailored white linen blouse." };
+        string prompt = OutfitPromptBuilder.Build(options, edited);
+        Assert.Contains(edited.Prompt, prompt);
+        foreach (string oldDirection in new[] { "sporty", "sports bra", "minimal black", "functional innerwear" })
+            Assert.DoesNotContain(oldDirection, prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("运动风", prompt);
+        Assert.Contains("Do not add a different garment type or style", prompt);
+    }
+
+    [Theory]
+    [InlineData(OutfitStylePresetType.Bikini)]
+    [InlineData(OutfitStylePresetType.JK)]
+    public void OtherPresetsDoNotInheritSportGarment(OutfitStylePresetType preset)
+    {
+        string prompt = OutfitPromptBuilder.Build(new OutfitPreviewOptions(preset));
+        Assert.DoesNotContain("sports bra", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("functional innerwear", prompt, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sporty minimal", prompt, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]
