@@ -11,6 +11,7 @@ public sealed class OutfitPreviewSession : IDisposable
     public bool HasResult => _resultImage is not null;
     public string? ErrorMessage { get; private set; }
     public Bitmap? ResultImage => _resultImage;
+    internal Bitmap OriginalImage => _originalImage;
     public bool IsBusy => State is OutfitPreviewState.Preparing or OutfitPreviewState.Generating or OutfitPreviewState.Applying;
 
     public OutfitPreviewSession(Bitmap originalImage)

@@ -36,6 +36,7 @@ public sealed class ScreenshotOverlayForm : Form
     private readonly Rectangle[] _styleOptionBounds = new Rectangle[8];
     private IReadOnlyList<OutfitStylePreset> _visibleStyles = OutfitStyleCatalog.BuiltIn;
     private bool _stylePickerOpen;
+    private bool _isHoldingOriginalPreview;
     private int _hoveredStyleIndex = -1;
     private OutfitStylePresetType _lastChosenStyle = OutfitStylePresetType.Sport;
     private Point _dragStart;
@@ -63,6 +64,8 @@ public sealed class ScreenshotOverlayForm : Form
 
     internal OutfitPreviewState OutfitStateForTesting => _outfitSession?.State ?? OutfitPreviewState.None;
     internal bool HasOutfitResultForTesting => _outfitSession?.HasResult == true;
+    internal bool IsHoldingOriginalPreviewForTesting => _isHoldingOriginalPreview;
+    internal Rectangle SelectionForTesting => _selection;
     internal bool IsStylePickerOpenForTesting => _stylePickerOpen;
     internal IReadOnlyList<string> StyleLabelsForTesting => (_stylePickerOpen ? _visibleStyles : AvailableStyles()).Select(style => StyleLabel(style.Type)).ToArray();
     internal Bitmap CreateOutfitOriginalImageForTesting() =>
@@ -106,6 +109,31 @@ public sealed class ScreenshotOverlayForm : Form
         Point center = new(_confirmButtonBounds.Left + _confirmButtonBounds.Width / 2,
             _confirmButtonBounds.Top + _confirmButtonBounds.Height / 2);
         OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, center.X, center.Y, 0));
+    }
+
+    internal void MouseDownAtForTesting(Point point) =>
+        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+
+    internal void MouseUpAtForTesting(Point point) =>
+        OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+
+    internal void MouseMoveAtForTesting(Point point) =>
+        OnMouseMove(new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+
+    internal void LoseCaptureForTesting()
+    {
+        Capture = false;
+        OnMouseCaptureChanged(EventArgs.Empty);
+    }
+
+    internal void DeactivateForTesting() => OnDeactivate(EventArgs.Empty);
+
+    internal Color RenderSelectionCenterForTesting()
+    {
+        using Bitmap frame = new(Math.Max(1, ClientSize.Width), Math.Max(1, ClientSize.Height));
+        using Graphics graphics = Graphics.FromImage(frame);
+        OnPaint(new PaintEventArgs(graphics, ClientRectangle));
+        return frame.GetPixel(_selection.Left + _selection.Width / 2, _selection.Top + _selection.Height / 2);
     }
 
     public ScreenshotOverlayForm(Rectangle virtualBounds, Bitmap desktopSnapshot, bool extractTextOnSelection = false,
@@ -209,6 +237,14 @@ public sealed class ScreenshotOverlayForm : Form
             }
 
             SelectionHitTarget target = SelectionMath.HitTest(_selection, e.Location, HandleSize + 6);
+            if (target == SelectionHitTarget.Move && !_toolbarBounds.Contains(e.Location) &&
+                _outfitSession is { State: OutfitPreviewState.Success, HasResult: true })
+            {
+                _isHoldingOriginalPreview = true;
+                Capture = true;
+                Invalidate(_selection);
+                return;
+            }
             if (target != SelectionHitTarget.None)
             {
                 _isAdjusting = true;
@@ -231,6 +267,12 @@ public sealed class ScreenshotOverlayForm : Form
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
+
+        if (_isHoldingOriginalPreview)
+        {
+            Cursor = Cursors.Hand;
+            return;
+        }
 
         if (_outfitSession?.IsBusy == true)
         {
@@ -285,6 +327,12 @@ public sealed class ScreenshotOverlayForm : Form
     {
         base.OnMouseUp(e);
 
+        if (_isHoldingOriginalPreview && e.Button == MouseButtons.Left)
+        {
+            ResetOriginalComparePreview();
+            return;
+        }
+
         if (_isAdjusting && e.Button == MouseButtons.Left)
         {
             _isAdjusting = false;
@@ -327,6 +375,26 @@ public sealed class ScreenshotOverlayForm : Form
 
         UpdateToolbarBounds();
         Invalidate();
+    }
+
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (_isHoldingOriginalPreview && !Capture) ResetOriginalComparePreview();
+    }
+
+    protected override void OnDeactivate(EventArgs e)
+    {
+        ResetOriginalComparePreview();
+        base.OnDeactivate(e);
+    }
+
+    private void ResetOriginalComparePreview()
+    {
+        bool wasHolding = _isHoldingOriginalPreview;
+        _isHoldingOriginalPreview = false;
+        if (Capture) Capture = false;
+        if (wasHolding && !IsDisposed && !Disposing) Invalidate(_selection);
     }
 
     private void ConfirmSelection()
@@ -393,6 +461,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     public bool TryBeginOutfitPreview()
     {
+        ResetOriginalComparePreview();
         if (IsDisposed || Disposing || !_hasSelection || !SelectionMath.IsCapturable(_selection) ||
             _outfitSession is null || !_outfitSession.TryBegin()) return false;
         CloseStylePicker();
@@ -412,6 +481,7 @@ public sealed class ScreenshotOverlayForm : Form
 
         if (e.KeyCode == Keys.Escape)
         {
+            ResetOriginalComparePreview();
             if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
             else if (_stylePickerOpen) CloseStylePicker();
             else CancelCapture();
@@ -443,7 +513,10 @@ public sealed class ScreenshotOverlayForm : Form
         Rectangle selection = _hasSelection ? _selection : SelectionMath.FromPoints(_dragStart, _dragCurrent);
         if (_outfitSession?.HasResult == true && _outfitSession.ResultImage is Bitmap outfitResult)
         {
-            DrawImageCover(e.Graphics, outfitResult, selection);
+            if (_isHoldingOriginalPreview)
+                e.Graphics.DrawImage(_outfitSession.OriginalImage, selection);
+            else
+                DrawImageCover(e.Graphics, outfitResult, selection);
         }
         else
         {
@@ -483,6 +556,7 @@ public sealed class ScreenshotOverlayForm : Form
     {
         if (disposing)
         {
+            ResetOriginalComparePreview();
             _outfitTimer.Stop();
             _outfitTimer.Dispose();
             _toolTip.Dispose();
@@ -652,6 +726,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void RestoreOutfitOriginal()
     {
+        ResetOriginalComparePreview();
         if (_outfitSession?.HasResult != true || _outfitSession.IsBusy) return;
         _outfitSession.RestoreOriginal();
         _outfitTimer.Stop();
@@ -660,6 +735,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void ResetOutfitForSelection()
     {
+        ResetOriginalComparePreview();
         CloseStylePicker();
         _outfitTimer.Stop();
         _outfitSession?.Dispose();
@@ -856,6 +932,7 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void CancelCapture()
     {
+        ResetOriginalComparePreview();
         Hide();
         CaptureCancelled?.Invoke(this, EventArgs.Empty);
     }
