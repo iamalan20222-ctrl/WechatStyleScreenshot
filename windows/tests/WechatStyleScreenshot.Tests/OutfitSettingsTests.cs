@@ -284,7 +284,7 @@ public class OutfitSettingsTests
     }
 
     [Fact]
-    public void ApiSettingsNeverPrefillsSavedKey()
+    public void ApiSettingsShowsFixedMaskWithoutReloadingSavedKey()
     {
         string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
         CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
@@ -296,7 +296,10 @@ public class OutfitSettingsTests
             {
                 using ApiSettingsForm form = new(new OutfitSettingsStore(Path.Combine(directory, "settings.json")), credentials);
                 TextBox password = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
-                Assert.Equal(string.Empty, password.Text);
+                Assert.Equal(new string('•', 20), password.Text);
+                Assert.True(form.ShowingSavedCredentialMaskForTesting);
+                Assert.DoesNotContain("test-saved-key", password.Text);
+                Assert.False(Descendants(form).OfType<Button>().Single(button => button.Text == "显示").Enabled);
             }
             catch (Exception ex) { failure = ex; }
         });
@@ -338,23 +341,65 @@ public class OutfitSettingsTests
                 Assert.True(input.UseSystemPasswordChar);
                 Assert.Equal("显示", reveal.Text);
                 Assert.True(form.SaveSettings());
-                Assert.Equal(string.Empty, input.Text);
+                Assert.Equal(new string('•', 20), input.Text);
+                Assert.True(form.ShowingSavedCredentialMaskForTesting);
+                Assert.False(reveal.Enabled);
                 Assert.Equal("✓ 已保存", Descendants(form).OfType<Label>().Single(label => label.Text == "✓ 已保存").Text);
                 Assert.True(credentials.HasCredential(provider));
             }
 
             using ApiSettingsForm reopened = new(settings, credentials);
+            reopened.Show();
             reopened.SelectProviderForTesting(provider);
-            TextBox blank = Descendants(reopened).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
-            Assert.Equal(string.Empty, blank.Text);
+            TextBox masked = Descendants(reopened).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+            Assert.Equal(new string('•', 20), masked.Text);
+            Assert.True(reopened.ShowingSavedCredentialMaskForTesting);
             Assert.Contains("已配置", Descendants(reopened).OfType<Label>()
                 .Single(label => label.Text.Contains("火山方舟：", StringComparison.Ordinal)).Text);
             if (provider == ImageEditProviderKind.Volcano)
                 VolcanoModelCombo(reopened).SelectedItem = AiOutfitPreviewService.ProModel;
             Assert.True(reopened.SaveSettings());
             Assert.Equal(testKey, credentials.GetCredential(provider));
+            Assert.Equal(new string('•', 20), masked.Text);
+            Assert.True(reopened.ShowingSavedCredentialMaskForTesting);
+
+            ComboBox model = Descendants(reopened).OfType<ComboBox>()
+                .Single(box => box.Items.Contains(provider == ImageEditProviderKind.Volcano
+                    ? AiOutfitPreviewService.ProModel
+                    : provider == ImageEditProviderKind.Qwen ? "qwen-image-3.0-pro" : "gpt-image-2.5-sunburst"));
+            model.Focus();
+            masked.Focus();
+            Assert.Equal(string.Empty, masked.Text);
+            Assert.False(reopened.ShowingSavedCredentialMaskForTesting);
+            masked.Text = "new-key";
+            Assert.True(reopened.SaveSettings());
+            Assert.Equal("new-key", credentials.GetCredential(provider));
+            Assert.Equal(new string('•', 20), masked.Text);
             reopened.DeleteSavedKey();
             Assert.False(credentials.HasCredential(provider));
+            Assert.Equal(string.Empty, masked.Text);
+            Assert.False(reopened.ShowingSavedCredentialMaskForTesting);
+        });
+    }
+
+    [Fact]
+    public void SwitchingProvidersShowsOnlyEachProvidersOwnSavedMask()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "WechatStyleScreenshot-tests", Guid.NewGuid().ToString("N"));
+        CredentialStore credentials = new(Path.Combine(directory, "secrets.dat"));
+        credentials.SaveCredential(ImageEditProviderKind.Volcano, "volcano-test-key-with-long-length");
+        credentials.SaveCredential(ImageEditProviderKind.OpenAI, "short-key");
+        RunOnSta(() =>
+        {
+            using ApiSettingsForm form = new(new OutfitSettingsStore(Path.Combine(directory, "settings.json")), credentials);
+            TextBox input = Descendants(form).OfType<TextBox>().Single(box => box.UseSystemPasswordChar);
+            Assert.Equal(new string('•', 20), input.Text);
+            form.SelectProviderForTesting(ImageEditProviderKind.Qwen);
+            Assert.Equal(string.Empty, input.Text);
+            form.SelectProviderForTesting(ImageEditProviderKind.OpenAI);
+            Assert.Equal(new string('•', 20), input.Text);
+            form.SelectProviderForTesting(ImageEditProviderKind.Volcano);
+            Assert.Equal(new string('•', 20), input.Text);
         });
     }
 

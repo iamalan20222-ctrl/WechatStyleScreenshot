@@ -5,6 +5,7 @@ namespace WechatStyleScreenshot.UI;
 
 public sealed class ApiSettingsForm : Form
 {
+    private static readonly string SavedCredentialMask = new('•', 20);
     private readonly OutfitSettingsStore _store;
     private readonly CredentialStore _credentials;
     private OutfitAppSettings _settings;
@@ -21,6 +22,7 @@ public sealed class ApiSettingsForm : Form
     private readonly Label _regionLabel = new() { Text = "Region", AutoSize = true };
     private readonly Label _workspaceLabel = new() { Text = "Workspace ID", AutoSize = true };
     private readonly Label _baseUrlLabel = new() { Text = "Base URL", AutoSize = true };
+    private bool _showingSavedCredentialMask;
 
     public ApiSettingsForm(OutfitSettingsStore store, CredentialStore credentials)
     {
@@ -48,8 +50,20 @@ public sealed class ApiSettingsForm : Form
         keyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
         _reveal.Click += (_, _) =>
         {
+            if (_showingSavedCredentialMask) return;
             _key.UseSystemPasswordChar = !_key.UseSystemPasswordChar;
             _reveal.Text = _key.UseSystemPasswordChar ? "显示" : "隐藏";
+        };
+        _key.Enter += (_, _) => BeginEditingCredential();
+        _key.MouseDown += (_, _) => BeginEditingCredential();
+        _key.KeyDown += (_, _) => BeginEditingCredential();
+        _key.TextChanged += (_, _) =>
+        {
+            if (_showingSavedCredentialMask && _key.Text != SavedCredentialMask)
+            {
+                _showingSavedCredentialMask = false;
+                _reveal.Enabled = true;
+            }
         };
         keyRow.Controls.Add(_key, 0, 0);
         keyRow.Controls.Add(_reveal, 1, 0);
@@ -104,11 +118,36 @@ public sealed class ApiSettingsForm : Form
 
     internal void SelectProviderForTesting(ImageEditProviderKind provider) => _editingProvider.SelectedIndex = (int)provider;
 
-    private void LoadEditor()
+    internal bool ShowingSavedCredentialMaskForTesting => _showingSavedCredentialMask;
+
+    private void BeginEditingCredential()
     {
+        if (!_showingSavedCredentialMask) return;
+        _showingSavedCredentialMask = false;
+        _key.Clear();
+        _reveal.Enabled = true;
+    }
+
+    private void UpdateCredentialDisplay()
+    {
+        _showingSavedCredentialMask = false;
         _key.Clear();
         _key.UseSystemPasswordChar = true;
         _reveal.Text = "显示";
+        bool saved;
+        try { saved = _credentials.HasCredential(SelectedProvider); }
+        catch (Exception ex) when (ex is IOException or CryptographicException or UnauthorizedAccessException) { saved = false; }
+        if (saved)
+        {
+            _showingSavedCredentialMask = true;
+            _key.Text = SavedCredentialMask;
+        }
+        _reveal.Enabled = !saved;
+    }
+
+    private void LoadEditor()
+    {
+        UpdateCredentialDisplay();
         _saveFeedback.Text = string.Empty;
         _model.Items.Clear();
         switch (SelectedProvider)
@@ -164,12 +203,11 @@ public sealed class ApiSettingsForm : Form
                     break;
                 case ImageEditProviderKind.OpenAI: latest.OpenAiModel = selectedModel; break;
             }
-            if (!string.IsNullOrWhiteSpace(_key.Text)) _credentials.SaveCredential(SelectedProvider, _key.Text);
+            if (!_showingSavedCredentialMask && !string.IsNullOrWhiteSpace(_key.Text))
+                _credentials.SaveCredential(SelectedProvider, _key.Text);
             _store.Save(latest);
             _settings = latest;
-            _key.Clear();
-            _key.UseSystemPasswordChar = true;
-            _reveal.Text = "显示";
+            UpdateCredentialDisplay();
             RefreshStatus();
             _saveFeedback.ForeColor = Color.ForestGreen;
             _saveFeedback.Text = "✓ 已保存";
@@ -197,7 +235,7 @@ public sealed class ApiSettingsForm : Form
     internal void DeleteSavedKey()
     {
         _credentials.DeleteCredential(SelectedProvider);
-        _key.Clear();
+        UpdateCredentialDisplay();
         RefreshStatus();
         _saveFeedback.Text = string.Empty;
     }
