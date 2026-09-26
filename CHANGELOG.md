@@ -1,5 +1,7 @@
 # Changelog
 
+- Windows 截图确认工具栏新增矢量箭头标注，支持颜色、线宽、实时预览、撤销，复制和钉图时合成标注
+
 ## Unreleased
 
 ### Added

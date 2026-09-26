@@ -7,6 +7,7 @@
 - Windows：`Alt + A` 唤醒截图
 - Windows：`Alt + Shift + A` 直接框选并提取文字
 - Windows：确认工具栏“试”可生成 AI 内衣穿搭预览
+- Windows：确认工具栏“↗”可在选区内画箭头；颜色和粗细可选，`Ctrl + Z` 撤销最近一支。箭头只叠加到复制或钉图结果，不进入 OCR、翻译或 AI 请求。
 - macOS：`Option + A` 唤醒截图
 - macOS：`Option + Shift + A` 直接框选并提取文字
 - 框选区域后进入确认态

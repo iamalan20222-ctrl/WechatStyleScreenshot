@@ -10,7 +10,7 @@ namespace WechatStyleScreenshot.UI;
 public sealed class ScreenshotOverlayForm : Form
 {
     private const int HandleSize = 9;
-    private const int ToolbarWidth = 248;
+    private const int ToolbarWidth = 294;
     private const int ToolbarHeight = 46;
     private const int ToolbarGap = 14;
     private const int ToolbarButtonSize = 30;
@@ -30,11 +30,24 @@ public sealed class ScreenshotOverlayForm : Form
     private Rectangle _selection;
     private Rectangle _toolbarBounds;
     private Rectangle _cancelButtonBounds;
+    private Rectangle _arrowButtonBounds;
     private Rectangle _ocrButtonBounds;
     private Rectangle _translationButtonBounds;
     private Rectangle _outfitButtonBounds;
     private Rectangle _confirmButtonBounds;
     private Rectangle _pinButtonBounds;
+    private Rectangle _arrowPaletteBounds;
+    private readonly Rectangle[] _arrowColorBounds = new Rectangle[6];
+    private readonly Rectangle[] _arrowWidthBounds = new Rectangle[3];
+    private static readonly Color[] ArrowColors = [Color.Red, Color.Yellow, Color.LimeGreen, Color.DodgerBlue, Color.White, Color.Black];
+    private static readonly int[] ArrowWidths = [2, 4, 7];
+    private static Color _lastArrowColor = Color.Red;
+    private static int _lastArrowWidth = 4;
+    private readonly AnnotationSession _annotations = new();
+    private bool _arrowPaletteOpen;
+    private bool _drawingArrow;
+    private PointF _arrowStart;
+    private PointF _arrowEnd;
     private bool _pinHovered;
     private bool _pinPressed;
     private Rectangle _stylePickerBounds;
@@ -81,6 +94,14 @@ public sealed class ScreenshotOverlayForm : Form
     internal bool HasTranslationResultForTesting => _translationResultImage is not null;
     internal bool HasTranslationResult => _translationResultImage is not null;
     internal Rectangle PinButtonBoundsForTesting => _pinButtonBounds;
+    internal Rectangle ArrowButtonBoundsForTesting => _arrowButtonBounds;
+    internal Rectangle ArrowPaletteBoundsForTesting => _arrowPaletteBounds;
+    internal int ArrowCountForTesting => _annotations.Arrows.Count;
+    internal bool ArrowModeForTesting => _annotations.Tool == AnnotationTool.Arrow;
+    internal bool ArrowPaletteOpenForTesting => _arrowPaletteOpen;
+    internal void ClickArrowForTesting() => MouseDownAtForTesting(new Point(_arrowButtonBounds.Left + 15, _arrowButtonBounds.Top + 15));
+    internal void PressUndoForTesting() => OnKeyDown(new KeyEventArgs(Keys.Control | Keys.Z));
+    internal void PressEscapeForTesting() => OnKeyDown(new KeyEventArgs(Keys.Escape));
     public Point CurrentSelectionScreenLocation => new(_selection.Left + _virtualBounds.Left, _selection.Top + _virtualBounds.Top);
     internal bool PinOnSelectionForTesting => _pinOnSelection;
     internal bool ToolbarVisibleForTesting => _hasSelection && !_pinOnSelection;
@@ -200,6 +221,12 @@ public sealed class ScreenshotOverlayForm : Form
     {
         base.OnMouseDown(e);
 
+        if (_drawingArrow && e.Button == MouseButtons.Right)
+        {
+            StopArrowDraft();
+            return;
+        }
+
         if (IsTranslationBusy)
         {
             if (e.Button == MouseButtons.Right || (e.Button == MouseButtons.Left && _cancelButtonBounds.Contains(e.Location)))
@@ -241,6 +268,20 @@ public sealed class ScreenshotOverlayForm : Form
             return;
         }
 
+        if (_arrowPaletteOpen && e.Button == MouseButtons.Left)
+        {
+            for (int i = 0; i < _arrowColorBounds.Length; i++)
+                if (_arrowColorBounds[i].Contains(e.Location)) { _lastArrowColor = ArrowColors[i]; Invalidate(_arrowPaletteBounds); return; }
+            for (int i = 0; i < _arrowWidthBounds.Length; i++)
+                if (_arrowWidthBounds[i].Contains(e.Location)) { _lastArrowWidth = ArrowWidths[i]; Invalidate(_arrowPaletteBounds); return; }
+            if (!_arrowButtonBounds.Contains(e.Location))
+            {
+                CloseArrowPalette();
+                if (!_selection.Contains(e.Location)) return;
+            }
+            else CloseArrowPalette();
+        }
+
         SelectionMouseAction action = SelectionMath.GetMouseAction(e.Button, e.Clicks, _hasSelection);
         if (action == SelectionMouseAction.Cancel)
         {
@@ -248,7 +289,7 @@ public sealed class ScreenshotOverlayForm : Form
             return;
         }
 
-        if (action == SelectionMouseAction.Confirm)
+        if (action == SelectionMouseAction.Confirm && _annotations.Tool != AnnotationTool.Arrow)
         {
             ConfirmSelection();
             return;
@@ -261,6 +302,13 @@ public sealed class ScreenshotOverlayForm : Form
 
         if (_hasSelection)
         {
+            if (_arrowButtonBounds.Contains(e.Location))
+            {
+                _annotations.Tool = _annotations.Tool == AnnotationTool.Arrow ? AnnotationTool.None : AnnotationTool.Arrow;
+                _arrowPaletteOpen = _annotations.Tool == AnnotationTool.Arrow;
+                Invalidate();
+                return;
+            }
             if (_confirmButtonBounds.Contains(e.Location))
             {
                 ConfirmSelection();
@@ -275,23 +323,37 @@ public sealed class ScreenshotOverlayForm : Form
 
             if (_ocrButtonBounds.Contains(e.Location))
             {
+                ExitArrowMode();
                 RequestTextExtraction();
                 return;
             }
 
             if (_translationButtonBounds.Contains(e.Location))
             {
+                ExitArrowMode();
                 TranslationStartRequested?.Invoke(this);
                 return;
             }
 
             if (_outfitButtonBounds.Contains(e.Location))
             {
+                ExitArrowMode();
                 RequestOutfitPreview();
                 return;
             }
 
             SelectionHitTarget target = SelectionMath.HitTest(_selection, e.Location, HandleSize + 6);
+            if (_annotations.Tool == AnnotationTool.Arrow)
+            {
+                if (_selection.Contains(e.Location) && target == SelectionHitTarget.Move && !_pinButtonBounds.Contains(e.Location))
+                {
+                    _arrowStart = ToSelectionPoint(e.Location);
+                    _arrowEnd = _arrowStart;
+                    _drawingArrow = true;
+                    Cursor = Cursors.Cross;
+                }
+                return;
+            }
             if (target == SelectionHitTarget.Move && !_toolbarBounds.Contains(e.Location) &&
                 (_outfitSession is { State: OutfitPreviewState.Success, HasResult: true } || _translationResultImage is not null))
             {
@@ -323,6 +385,13 @@ public sealed class ScreenshotOverlayForm : Form
     {
         base.OnMouseMove(e);
 
+        if (_drawingArrow)
+        {
+            _arrowEnd = ToSelectionPoint(e.Location);
+            Invalidate(_selection);
+            return;
+        }
+
         if (_pinPressed)
         {
             Cursor = Cursors.Hand;
@@ -352,6 +421,11 @@ public sealed class ScreenshotOverlayForm : Form
             Cursor = hovered >= 0 ? Cursors.Hand : Cursors.Default;
             return;
         }
+        if (_arrowPaletteOpen && _arrowPaletteBounds.Contains(e.Location))
+        {
+            Cursor = Cursors.Hand;
+            return;
+        }
 
         if (_isAdjusting)
         {
@@ -379,14 +453,14 @@ public sealed class ScreenshotOverlayForm : Form
                     UpdateHoveredToolbarButton(ToolbarButtonHit.None);
                     return;
                 }
-                ToolbarButtonHit hoveredButton = SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _translationButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
+                ToolbarButtonHit hoveredButton = _arrowButtonBounds.Contains(e.Location) ? ToolbarButtonHit.Arrow : SelectionMath.HitTestToolbarButtons(_cancelButtonBounds, _ocrButtonBounds, _translationButtonBounds, _outfitButtonBounds, _confirmButtonBounds, e.Location);
                 UpdateHoveredToolbarButton(hoveredButton);
                 if (hoveredButton == ToolbarButtonHit.OutfitPreview)
                     _toolTip.Show("再试一款", this, e.X + 8, e.Y + 8, 900);
                 else
                     _toolTip.Hide(this);
                 Cursor = hoveredButton == ToolbarButtonHit.None
-                    ? GetCursorForTarget(SelectionMath.HitTest(_selection, e.Location, HandleSize + 6))
+                    ? _annotations.Tool == AnnotationTool.Arrow ? Cursors.Cross : GetCursorForTarget(SelectionMath.HitTest(_selection, e.Location, HandleSize + 6))
                     : Cursors.Default;
             }
 
@@ -401,6 +475,14 @@ public sealed class ScreenshotOverlayForm : Form
     {
         bool wasPressingPin = _pinPressed;
         base.OnMouseUp(e);
+
+        if (_drawingArrow && e.Button == MouseButtons.Left)
+        {
+            _arrowEnd = ToSelectionPoint(e.Location);
+            _annotations.Add(_arrowStart, _arrowEnd, _lastArrowColor, _lastArrowWidth * DeviceDpi / 96f);
+            StopArrowDraft();
+            return;
+        }
 
         if (wasPressingPin && e.Button == MouseButtons.Left)
         {
@@ -471,10 +553,12 @@ public sealed class ScreenshotOverlayForm : Form
         base.OnMouseCaptureChanged(e);
         if (_pinPressed && !Capture) { _pinPressed = false; Invalidate(_pinButtonBounds); }
         if (_isHoldingOriginalPreview && !Capture) ResetOriginalComparePreview();
+        if (_drawingArrow && !Capture) StopArrowDraft();
     }
 
     protected override void OnDeactivate(EventArgs e)
     {
+        StopArrowDraft();
         ResetOriginalComparePreview();
         base.OnDeactivate(e);
     }
@@ -572,6 +656,8 @@ public sealed class ScreenshotOverlayForm : Form
 
         if (e.KeyCode == Keys.Escape)
         {
+            if (_drawingArrow) { StopArrowDraft(); return; }
+            if (_annotations.Tool == AnnotationTool.Arrow) { ExitArrowMode(); return; }
             ResetOriginalComparePreview();
             if (IsTranslationBusy) TranslationCancellationRequested?.Invoke(this, EventArgs.Empty);
             else if (_outfitSession?.IsBusy == true) RequestOutfitCancellation();
@@ -580,7 +666,8 @@ public sealed class ScreenshotOverlayForm : Form
         }
         else if (e.Control && e.KeyCode == Keys.Z)
         {
-            if (_translationResultImage is not null) ClearTranslationResult();
+            if (_annotations.Undo()) Invalidate(_selection);
+            else if (_translationResultImage is not null) ClearTranslationResult();
             else RestoreOutfitOriginal();
         }
         else if (e.KeyCode == Keys.Enter && _hasSelection && _outfitSession?.IsBusy != true && !IsTranslationBusy)
@@ -621,6 +708,11 @@ public sealed class ScreenshotOverlayForm : Form
             e.Graphics.DrawImage(_desktopSnapshot, selection, selection, GraphicsUnit.Pixel);
         }
 
+        if (_hasSelection && !_isHoldingOriginalPreview)
+            AnnotationRenderer.Draw(e.Graphics, _annotations.Arrows, selection);
+        if (_drawingArrow)
+            AnnotationRenderer.Draw(e.Graphics, [new ArrowAnnotation(_arrowStart, _arrowEnd, _lastArrowColor, _lastArrowWidth * DeviceDpi / 96f)], selection);
+
         using Pen borderPen = new(AccentColor, 2)
         {
             DashStyle = System.Drawing.Drawing2D.DashStyle.Dash
@@ -649,6 +741,7 @@ public sealed class ScreenshotOverlayForm : Form
         {
             DrawToolbar(e.Graphics);
             if (_stylePickerOpen) DrawStylePicker(e.Graphics);
+            if (_arrowPaletteOpen) DrawArrowPalette(e.Graphics);
             DrawPinButton(e.Graphics);
         }
     }
@@ -702,10 +795,16 @@ public sealed class ScreenshotOverlayForm : Form
         _toolbarBounds = new Rectangle(x, y, ToolbarWidth, ToolbarHeight);
         _pinButtonBounds = PinButtonLayout.GetBounds(_selection, ClientRectangle, DeviceDpi);
         _cancelButtonBounds = new Rectangle(_toolbarBounds.Left + 16, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
-        _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
-        _translationButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
-        _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 155, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _arrowButtonBounds = new Rectangle(_toolbarBounds.Left + 63, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _ocrButtonBounds = new Rectangle(_toolbarBounds.Left + 109, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _translationButtonBounds = new Rectangle(_toolbarBounds.Left + 155, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        _outfitButtonBounds = new Rectangle(_toolbarBounds.Left + 201, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
         _confirmButtonBounds = new Rectangle(_toolbarBounds.Right - 16 - ToolbarButtonSize, _toolbarBounds.Top + 8, ToolbarButtonSize, ToolbarButtonSize);
+        int paletteY = _toolbarBounds.Top - 50;
+        if (paletteY < 8) paletteY = _toolbarBounds.Bottom + 6;
+        _arrowPaletteBounds = new Rectangle(Math.Clamp(_arrowButtonBounds.Left - 5, 8, Math.Max(8, ClientRectangle.Right - 260)), paletteY, 260, 44);
+        for (int i = 0; i < 6; i++) _arrowColorBounds[i] = new Rectangle(_arrowPaletteBounds.Left + 9 + i * 27, paletteY + 10, 22, 22);
+        for (int i = 0; i < 3; i++) _arrowWidthBounds[i] = new Rectangle(_arrowPaletteBounds.Left + 176 + i * 26, paletteY + 8, 24, 26);
         UpdateStylePickerBounds();
     }
 
@@ -822,8 +921,16 @@ public sealed class ScreenshotOverlayForm : Form
 
     public Bitmap? CreateTranslationResultImage() => _translationResultImage is null ? null : new Bitmap(_translationResultImage);
 
-    public Bitmap CreateCurrentVisualSelectionImage() =>
-        CreateTranslationResultImage() ?? CreateOutfitResultImage() ?? CreateOriginalSelectionImage();
+    public Bitmap CreateCurrentVisualSelectionImage(bool includeAnnotations = false)
+    {
+        Bitmap image = CreateTranslationResultImage() ?? CreateOutfitResultImage() ?? CreateOriginalSelectionImage();
+        if (includeAnnotations && _annotations.Arrows.Count > 0)
+        {
+            using Graphics graphics = Graphics.FromImage(image);
+            AnnotationRenderer.Draw(graphics, _annotations.Arrows, new Rectangle(Point.Empty, image.Size));
+        }
+        return image;
+    }
 
     public bool TryBeginTranslation()
     {
@@ -916,6 +1023,9 @@ public sealed class ScreenshotOverlayForm : Form
 
     private void ResetOutfitForSelection()
     {
+        StopArrowDraft();
+        _annotations.Clear();
+        ExitArrowMode();
         ResetOriginalComparePreview();
         ClearTranslationResult();
         CloseStylePicker();
@@ -1065,6 +1175,17 @@ public sealed class ScreenshotOverlayForm : Form
         graphics.DrawLine(cancelPen, _cancelButtonBounds.Left + 8, _cancelButtonBounds.Top + 8, _cancelButtonBounds.Right - 8, _cancelButtonBounds.Bottom - 8);
         graphics.DrawLine(cancelPen, _cancelButtonBounds.Right - 8, _cancelButtonBounds.Top + 8, _cancelButtonBounds.Left + 8, _cancelButtonBounds.Bottom - 8);
 
+        DrawButtonHover(graphics, _arrowButtonBounds, ToolbarButtonHit.Arrow);
+        if (_annotations.Tool == AnnotationTool.Arrow)
+        {
+            using SolidBrush active = new(Color.FromArgb(75, AccentColor));
+            graphics.FillEllipse(active, _arrowButtonBounds);
+        }
+        using Pen arrowIcon = new(Color.WhiteSmoke, 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        graphics.DrawLine(arrowIcon, _arrowButtonBounds.Left + 7, _arrowButtonBounds.Bottom - 7, _arrowButtonBounds.Right - 7, _arrowButtonBounds.Top + 7);
+        graphics.DrawLines(arrowIcon, new Point[] { new(_arrowButtonBounds.Right - 15, _arrowButtonBounds.Top + 7), new(_arrowButtonBounds.Right - 7, _arrowButtonBounds.Top + 7), new(_arrowButtonBounds.Right - 7, _arrowButtonBounds.Top + 15) });
+
         DrawButtonHover(graphics, _ocrButtonBounds, ToolbarButtonHit.Ocr);
         using Font ocrFont = new("Microsoft YaHei UI", 12f, FontStyle.Bold, GraphicsUnit.Point);
         using SolidBrush ocrBrush = new(Color.WhiteSmoke);
@@ -1108,6 +1229,61 @@ public sealed class ScreenshotOverlayForm : Form
             graphics.DrawString(StyleLabel(style.Type), font, text,
                 new Rectangle(row.Left + 12, row.Top, row.Width - 20, row.Height), format);
         }
+    }
+
+    private void DrawArrowPalette(Graphics graphics)
+    {
+        using GraphicsPath path = RoundedRectangle(_arrowPaletteBounds, 7);
+        using SolidBrush background = new(Color.FromArgb(244, 32, 32, 36));
+        graphics.FillPath(background, path);
+        for (int i = 0; i < ArrowColors.Length; i++)
+        {
+            using SolidBrush swatch = new(ArrowColors[i]);
+            graphics.FillEllipse(swatch, _arrowColorBounds[i]);
+            if (ArrowColors[i].ToArgb() == _lastArrowColor.ToArgb())
+            {
+                using Pen selected = new(Color.White, 2);
+                Rectangle ring = _arrowColorBounds[i]; ring.Inflate(2, 2);
+                graphics.DrawEllipse(selected, ring);
+            }
+        }
+        for (int i = 0; i < ArrowWidths.Length; i++)
+        {
+            Rectangle box = _arrowWidthBounds[i];
+            if (_lastArrowWidth == ArrowWidths[i])
+            {
+                using SolidBrush selected = new(Color.FromArgb(75, AccentColor));
+                graphics.FillRectangle(selected, box);
+            }
+            using Pen line = new(Color.WhiteSmoke, ArrowWidths[i]);
+            graphics.DrawLine(line, box.Left + 5, box.Top + box.Height / 2, box.Right - 5, box.Top + box.Height / 2);
+        }
+    }
+
+    private PointF ToSelectionPoint(Point point) => new(
+        Math.Clamp(point.X - _selection.Left, 0, _selection.Width - 1),
+        Math.Clamp(point.Y - _selection.Top, 0, _selection.Height - 1));
+
+    private void StopArrowDraft()
+    {
+        if (!_drawingArrow) return;
+        _drawingArrow = false;
+        if (Capture) Capture = false;
+        if (!IsDisposed && !Disposing) Invalidate(_selection);
+    }
+
+    private void CloseArrowPalette()
+    {
+        _arrowPaletteOpen = false;
+        Invalidate(_arrowPaletteBounds);
+    }
+
+    private void ExitArrowMode()
+    {
+        StopArrowDraft();
+        _annotations.Tool = AnnotationTool.None;
+        CloseArrowPalette();
+        Invalidate(_arrowButtonBounds);
     }
 
     private string StyleLabel(OutfitStylePresetType type)

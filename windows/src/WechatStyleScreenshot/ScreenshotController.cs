@@ -144,7 +144,7 @@ public sealed class ScreenshotController
         {
             bool translated = overlay.HasTranslationResult;
             bool outfit = overlay.HasOutfitResult;
-            using Bitmap bitmap = overlay.CreateCurrentVisualSelectionImage();
+            using Bitmap bitmap = overlay.CreateCurrentVisualSelectionImage(includeAnnotations: true);
             Trace.WriteLine($"[Clipboard] CONFIRM_CLICKED HAS_OUTFIT_RESULT={outfit} IMAGE_WIDTH={bitmap.Width} IMAGE_HEIGHT={bitmap.Height} PIXEL_FORMAT={bitmap.PixelFormat} CLIPBOARD_THREAD_APARTMENT={Thread.CurrentThread.GetApartmentState()}");
             if (!_clipboardManager.TrySetImage(bitmap))
             {
@@ -170,7 +170,7 @@ public sealed class ScreenshotController
         if (sender is not ScreenshotOverlayForm overlay || !ReferenceEquals(_overlay, overlay)) return;
         try
         {
-            using Bitmap visual = overlay.CreateCurrentVisualSelectionImage();
+            using Bitmap visual = overlay.CreateCurrentVisualSelectionImage(includeAnnotations: true);
             Point location = overlay.CurrentSelectionScreenLocation;
             _pinnedWindows.Pin(visual, location, _clipboardManager);
             ResetOverlay();
