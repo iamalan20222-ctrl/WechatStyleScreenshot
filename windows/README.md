@@ -19,6 +19,8 @@
 - 托盘右键切换开机启动
 - 命令行开关支持写入或移除开机启动项
 
+托盘右键菜单包含“Alt + A 截图”、“开机启动”、“提示词设置”、“添加 APIKEY”和“退出”。OCR 可通过截图工具栏“文”按钮或全局快捷键 `Alt + Shift + A` 使用。
+
 ## 项目结构
 
 ```text
@@ -31,6 +33,9 @@ WechatStyleScreenshot/
     Services/HotkeyManager.cs          RegisterHotKey 全局快捷键
     Services/ScreenCaptureEngine.cs    Graphics.CopyFromScreen 截图
     Services/ClipboardManager.cs       Clipboard.SetImage 写入剪贴板
+    Services/AiOutfitPreviewService.cs 火山方舟图像编辑 API
+    Services/OutfitPromptBuilder.cs    穿搭 prompt 与安全约束
+    Services/OutfitPreviewOptions.cs   默认随机穿搭选项
     Services/StartupManager.cs         HKCU Run 开机启动
     UI/ScreenshotOverlayForm.cs        全屏遮罩和鼠标框选
   tests/WechatStyleScreenshot.Tests/
@@ -82,6 +87,16 @@ dotnet publish .\src\WechatStyleScreenshot\WechatStyleScreenshot.csproj -c Relea
 
 发布目录是可移动的完整应用包；请保留 `tessdata`、`x64` 和 Runtime DLL 文件，不要只复制 EXE。
 
+## Outfit API Smoke Test
+
+对你有权提交的图片，可在当前 PowerShell 进程设置 `ARK_API_KEY` 后运行：
+
+```powershell
+.\publish-self-contained\WechatStyleScreenshot.exe --outfit-smoke-test "C:\path\to\adult-model-test.jpeg"
+```
+
+Smoke test 通过正式 `AiOutfitPreviewService` 顺序发送三次请求，复用服务和 `HttpClient`，每次都使用同一份原图。结果 PNG 与脱敏诊断报告写到图片旁的 `results` 目录，不会写入仓库；报告不包含密钥、prompt 或图像载荷。
+
 ## 开机启动
 
 程序使用当前用户注册表启动项：
@@ -113,6 +128,14 @@ WechatStyleScreenshot
 4. 松开鼠标。
 5. 在微信、PPT、浏览器或文档中按 `Ctrl + V` 粘贴。
 6. 普通截图中点击工具栏“文”提取并复制文字；`Alt + Shift + A` 会在框选松开后立即执行 OCR。
+7. 点击确认工具栏“试”先选款式：A/B/C 始终可用，D-H 可在托盘“提示词设置”中启用。选款后在原选区生成穿搭预览；选区内显示进度，完成后直接显示结果，再点“试”会从原选区原图重新生成；点击“✓”复制当前显示内容，生成中按 `Esc` 或点“×”取消。
+
+AI 预览可在托盘“添加 APIKEY”中配置服务商密钥，密钥由当前 Windows 用户的 DPAPI 加密保存；截图和生成结果不会由应用长期保存。点击“试”并选择已启用款式后，选区原图才会发送给所选服务商，服务商侧数据处理依其政策。提示词包含身份、脸部、发型、比例、姿势、镜头角度和背景保持与非裸露约束，但生成结果不保证完全一致，仅供设计参考。请仅选择已成年且获得授权的模特图片。
+
+```powershell
+$env:ARK_API_KEY = '<your-new-ark-api-key>'
+.\publish\WechatStyleScreenshot.exe
+```
 
 ## 设计说明
 
@@ -129,7 +152,7 @@ WechatStyleScreenshot
 - 如果 `Alt + A` 被其他软件占用，托盘会弹出注册失败提示。
 - 程序需要在 STA 线程运行，项目入口已配置 `[STAThread]`。
 - DPI 感知通过 `app.manifest` 设置为 PerMonitorV2，减少缩放环境下的坐标偏差。
-- OCR 识别完全在本机运行；截图与识别文字不会上传，也不会收集。
+- OCR 识别完全在本机运行；只有用户点击“试”时，选定截图区域才会上传至火山方舟。
 
 ## 第三方许可
 

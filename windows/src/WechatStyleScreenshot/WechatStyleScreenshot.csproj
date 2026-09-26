@@ -11,7 +11,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WechatStyleScreenshot.Tests" />
+    <EmbeddedResource Include="Assets\pin.png" />
     <PackageReference Include="TesseractOCR" Version="5.5.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="ThinkGeo.Dependency.MicrosoftVisualCRunTime140" Version="14.5.4" />
   </ItemGroup>
   <ItemGroup>

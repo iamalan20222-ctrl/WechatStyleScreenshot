@@ -1,6 +1,7 @@
 using System.Drawing;
 using TesseractOCR;
 using TesseractOCR.Enums;
+using WechatStyleScreenshot.Core;
 using PixImage = TesseractOCR.Pix.Image;
 
 namespace WechatStyleScreenshot.Services;
@@ -22,6 +23,31 @@ public sealed class OcrService : IDisposable
         ArgumentNullException.ThrowIfNull(image);
         ObjectDisposedException.ThrowIf(_disposed, this);
         return Task.Run(() => Recognize(image));
+    }
+
+    public Task<IReadOnlyList<OcrTextRegion>> RecognizeRegionsAsync(Bitmap image, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Task.Run(() => RecognizeRegions(image, cancellationToken), cancellationToken);
+    }
+
+    private IReadOnlyList<OcrTextRegion> RecognizeRegions(Bitmap image, CancellationToken cancellationToken)
+    {
+        _engineLock.Wait(cancellationToken);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            EnsureAssetsExist();
+            _engine ??= new Engine(Path.Combine(_baseDirectory, "tessdata"), "chi_sim+eng", EngineMode.LstmOnly);
+            using MemoryStream stream = new();
+            image.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+            using PixImage pixImage = PixImage.LoadFromMemory(stream.ToArray());
+            using Page page = _engine.Process(pixImage);
+            cancellationToken.ThrowIfCancellationRequested();
+            return OcrRegionParser.Parse(page.TsvText, image.Size);
+        }
+        finally { _engineLock.Release(); }
     }
 
     private string Recognize(Bitmap image)

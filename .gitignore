@@ -2,6 +2,7 @@
 bin/
 obj/
 publish/
+publish-local/
 dist/
 build/
 *.app/
@@ -21,4 +22,3 @@ Thumbs.db
 # Packages
 *.zip
 *.nupkg
-

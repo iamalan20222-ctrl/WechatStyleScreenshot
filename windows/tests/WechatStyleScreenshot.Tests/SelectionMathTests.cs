@@ -132,4 +132,15 @@ public class SelectionMathTests
         Assert.Equal(ToolbarButtonHit.Confirm, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(95, 20)));
         Assert.Equal(ToolbarButtonHit.None, SelectionMath.HitTestToolbarButtons(cancel, ocr, confirm, new Point(45, 20)));
     }
+
+    [Fact]
+    public void HitTestToolbarButtonsDetectsOutfitPreview()
+    {
+        Rectangle cancel = new(10, 10, 30, 30);
+        Rectangle ocr = new(50, 10, 30, 30);
+        Rectangle outfit = new(90, 10, 30, 30);
+        Rectangle confirm = new(130, 10, 30, 30);
+
+        Assert.Equal(ToolbarButtonHit.OutfitPreview, SelectionMath.HitTestToolbarButtons(cancel, ocr, outfit, confirm, new Point(95, 20)));
+    }
 }
